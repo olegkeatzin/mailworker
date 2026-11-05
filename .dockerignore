@@ -1,0 +1,16 @@
+# В образ не нужно: исходники, тесты, данные и локальная конфигурация
+.git
+.github
+reference
+tests
+data
+config
+__pycache__
+*.py[cod]
+.pytest_cache
+pytest-cache-files-*
+.venv
+*.log
+README.md
+LICENSE
+docker-compose.yml

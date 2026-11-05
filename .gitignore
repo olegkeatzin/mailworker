@@ -1,0 +1,30 @@
+# Рабочая конфигурация с паролями: в репозиторий не попадает
+config.ini
+
+# Данные службы: состояние, архив писем, логи
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+
+# Исходные материалы проекта (ТЗ, схема базы, письмо) — не публикуются
+reference/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.venv*/
+pip-wheel-metadata/
+
+# Тесты и кэши
+.pytest_cache/
+tests/.work/
+pytest-cache-files-*
+
+# Среды и редакторы
+.idea/
+.vscode/
+.DS_Store

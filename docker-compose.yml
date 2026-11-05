@@ -1,0 +1,14 @@
+services:
+  mailworker:
+    build: .
+    image: mailworker:1.0.0
+    container_name: mailworker
+    restart: unless-stopped
+    environment:
+      # Часовой пояс влияет на дату регистрации и окно since_days
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      # Настройки — только чтение; данные служба пишет в /app/data
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    stop_grace_period: 30s

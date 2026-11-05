@@ -1,0 +1,203 @@
+; ============================================================================
+; MailWorker — автоматическая обработка почтового ящика в журнал учёта
+;
+; Всё настраивается здесь: почта, база, модель ИИ, поля журнала, логи.
+; Интерфейса у службы нет.
+;
+; Файл должен быть в кодировке UTF-8. Комментарии ставятся отдельной строкой
+; (символы ; и # в значении, например в пароле, считаются частью значения).
+; ============================================================================
+
+[mail]
+; Протокол: imap или pop3
+protocol = imap
+; Адрес почтового сервера и порт. Если порт не указан, он выбирается по
+; протоколу и шифрованию: imap+ssl 993, imap+starttls 143, pop3+ssl 995,
+; pop3+starttls 110.
+host = mail.example.ru
+port = 993
+; Шифрование: ssl (сразу TLS), starttls (повышение до TLS) или none
+tls = ssl
+; Ящик, который обрабатывается
+username = inbox@example.ru
+password = пароль
+; Папка IMAP (для POP3 не используется)
+mailbox = INBOX
+; Проверять сертификат сервера: true. false — только для внутренних
+; серверов с самоподписанным сертификатом.
+verify_tls = true
+; Таймаут сетевых операций, секунды
+timeout = 60
+; Какие письма брать: unseen (непрочитанные), all (все), since_days (за N дней)
+mode = unseen
+; Окно для mode = since_days: N календарных дней ВКЛЮЧАЯ сегодня
+; (1 — только сегодняшние письма, 7 — сегодня и шесть предыдущих).
+; IMAP ищет по дате на сервере, POP3 — локально по заголовку Date.
+since_days = 7
+; Помечать письмо прочитанным после записи в журнал (IMAP)
+mark_seen = true
+; Удалять письмо с сервера после записи (только POP3, по умолчанию выключено)
+delete_after = false
+; Пауза между опросами ящика, секунды
+poll_interval = 60
+; Максимум писем за один проход (защита от первого запуска на большом ящике)
+max_per_cycle = 20
+
+[database]
+; Firebird — та же база, что у сервиса FastAPI_sender_to_BD (таблица CARD)
+host = 10.70.203.249
+database = e:\ibSadko\TestAI\rdb_kanc29.fdb
+user = SYSDBA
+password = masterkey
+; Кодировка соединения Firebird. Служба сама подбирает кодек Python
+; для WIN1251/UTF8 и заменяет символы, которых нет в кодировке.
+charset = WIN1251
+; Клиентская библиотека Firebird (fbclient.dll или libfbclient.so).
+; Пусто — искать в PATH / системных каталогах.
+fb_client_library =
+; Как передавать даты: string — строкой ДД.ММ.ГГГГ (как рабочий сервис),
+; date — типом даты Python (если первое не принимается базой).
+date_format = string
+; Заменять символы, отсутствующие в кодировке базы: true
+sanitize_text = true
+
+[ai]
+; OpenAI-совместимый сервер: llama.cpp, vLLM, Ollama, OpenRouter и т. п.
+; Адрес обычно заканчивается на /v1
+base_url = http://localhost:8080/v1
+; Ключ. Для локального llama.cpp можно оставить not-needed
+api_key = not-needed
+; Имя модели — ровно как в ответе GET /models
+model = qwen2.5-7b-instruct
+; Таймаут ожидания ответа, секунды
+timeout = 120
+; Температура: 0.2 — разбор должен быть устойчивым, а не творческим
+temperature = 0.2
+max_tokens = 8192
+; Сколько раз повторять запрос при сбое сети или перегрузке сервера
+retries = 2
+; Требовать от модели строгий JSON (response_format = json_object)
+json_mode = true
+; Локальные reasoning-модели (Qwen3 и подобные) без этого обрывают JSON
+; на «размышлениях»
+disable_thinking = true
+; Дополнительные поля тела запроса в JSON, например {"top_k": 20}
+request_extra_json = {}
+; Передавать модели изображения и страницы PDF (нужно для OCR сканов)
+multimodal = true
+; Дополнительно отправлять картинки и основной модели (не только OCR-модели)
+images_in_analysis = false
+; Проверять TLS-сертификат эндпоинта модели
+verify_tls = true
+; Сколько страниц PDF рендерить для OCR
+ocr_max_pages = 10
+; Сколько страниц PDF читать из текстового слоя
+text_max_pages = 20
+; Предел текста одного вложения в промпте, символов
+max_text_chars = 60000
+; Свои промпты (пусто — встроенные). Пути отсчитываются от каталога .ini
+system_prompt_file =
+user_template_file =
+
+[ocr]
+; Отдельная модель распознавания сканов. Пусто — используется модель из [ai].
+base_url =
+model =
+api_key =
+timeout = 120
+; Сколько страниц распознавать одновременно
+concurrency = 3
+
+[journal]
+; Куда писать: db — напрямую в Firebird (таблица CARD),
+; api — HTTP POST на сервис FastAPI_sender_to_BD (/cards)
+storage = db
+; Адрес сервиса журнала для storage = api
+api_url = http://127.0.0.1:8000
+api_timeout = 30
+; CARD_TYPE = 1 — входящий документ
+card_type = 1
+; Регистрационный номер: его присваивает система учёта, в сервисе FastAPI так же
+reg_number = новая
+; Дата регистрации: today — сегодняшняя, email_date — дата письма
+reg_date = today
+; Дата документа, если модель её не нашла:
+; email_date — дата письма, reg_date — дата регистрации, today — сегодня,
+; none — не заполнять (NULL)
+doc_date_fallback = email_date
+; Номер документа, если модель не нашла: none — не заполнять (по умолчанию),
+; subject — искать в теме письма, regex — в теме и тексте (как в MailSense)
+doc_number_fallback = none
+; Количество листов: pdf_pages — сумма страниц PDF (иначе число вложений),
+; attachments — число вложений, analysis — ответ модели, one — всегда 1
+sheets_mode = pdf_pages
+; Длины текстовых колонок CARD (VARCHAR) — по ним обрезаются значения.
+; Значения по умолчанию соответствуют схеме базы.
+max_intindex_length = 20
+max_extindex_length = 20
+max_korresp_length = 100
+max_sh_contents_length = 512
+
+[classifiers]
+; КОРРЕСПОНДЕНТЫ И ТЕМЫ ЧИТАЮТСЯ ИЗ БАЗЫ — таблицы KORRESP и THEMA той же базы,
+; что и CARD. В журнал пишутся KORRESPID = KORRESP.ID и THEMA = THEMA.ID.
+enabled = true
+; Как часто перечитывать справочники, минуты (0 — только при запуске)
+refresh_minutes = 10
+; Запросы к справочникам. Четыре колонки строго по порядку:
+; ID, NAME, NUMBPART, SHOWS
+correspondents_sql = SELECT ID, NAME, NUMBPART, SHOWS FROM KORRESP WHERE COALESCE(SHOWS, 1) <> 0 ORDER BY NAME
+themes_sql = SELECT ID, NAME, NUMBPART, SHOWS FROM THEMA WHERE COALESCE(SHOWS, 1) <> 0 ORDER BY NAME
+; НЕОБЯЗАТЕЛЬНО: файл «почтовый адрес -> корреспондент». Нужен только для точного
+; связывания частых отправителей, потому что в KORRESP адресов нет.
+; Пусто — сопоставление идёт по названию организации из письма, данные — из базы.
+; Формат: email,correspondent_id,correspondent_name (образец — в classifiers/)
+email_map_file =
+; Порог похожести названий, 0.5..1.0
+match_threshold = 0.85
+; Корреспондент не найден: model — писать как определила модель, none — пусто,
+; skip — не регистрировать письмо, create — завести запись в KORRESP
+unknown_correspondent = model
+; Тема не найдена: none — THEMA = 0, skip — не регистрировать, create — завести в THEMA
+unknown_thema = none
+; Сколько названий тем передавать модели (0 — не передавать)
+themes_in_prompt = 300
+; Предельная длина названия при заведении новой записи справочника
+max_name_length = 150
+
+[processing]
+; ЧТО РЕГИСТРИРОВАТЬ. Это главная настройка отбора:
+;   all              — все письма (ящик, куда пересылают уже отобранную почту);
+;   ai               — решает модель: поле register и порог уверенности;
+;   with_attachments — только письма с вложениями.
+; По умолчанию all: служба рассчитана на ящик с отобранной корреспонденцией.
+; В режимах all и with_attachments поля register и confidence у модели
+; не запрашиваются — решение уже принято настройкой.
+filter_mode = all
+; Не регистрировать письма, отнесённые моделью к спаму (работает в любом режиме)
+skip_spam = false
+; Только для filter_mode = ai: требовать явное решение модели «регистрировать»
+require_register_flag = true
+; Только для filter_mode = ai: минимальная уверенность модели (0 — без порога)
+min_confidence = 0.0
+; Пропускать мелкие картинки в подписи (логотипы) — они не документ
+skip_inline_images = true
+min_inline_image_bytes = 30000
+; Повторять письма, обработка которых закончилась ошибкой
+retry_errors = true
+; Файл журнала обработки (защита от повторной записи).
+; В Docker: /app/data/state.sqlite
+state_path = data/state.sqlite
+; Куда складывать исходные письма после записи в журнал.
+; В Docker: /app/data/processed
+archive_dir = data/processed
+save_eml = true
+
+[logging]
+; DEBUG, INFO, WARNING, ERROR
+level = INFO
+; В Docker: /app/data/mailworker.log
+file = data/mailworker.log
+console = true
+max_bytes = 5000000
+backup_count = 5
