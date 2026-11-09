@@ -183,7 +183,8 @@ class ProcessingConfig:
     min_inline_image_bytes: int = 30000
     retry_errors: bool = True
     state_path: Path = Path("data/state.sqlite")
-    archive_dir: Path = Path("data/processed")
+    #: Корень архива: на каждую запись — папка с её номером (CARD.ID).
+    archive_dir: Path = Path("data")
     save_eml: bool = True
 
 
@@ -425,7 +426,7 @@ def _read_processing(r: "_Reader") -> ProcessingConfig:
         ),
         retry_errors=r.boolean("processing", "retry_errors", True),
         state_path=r.path("processing", "state_path", "data/state.sqlite"),
-        archive_dir=r.path("processing", "archive_dir", "data/processed"),
+        archive_dir=r.path("processing", "archive_dir", "data"),
         save_eml=r.boolean("processing", "save_eml", True),
     )
 

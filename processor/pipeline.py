@@ -22,9 +22,7 @@ filter_mode = ai — тогда решение принимает модель (
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -33,6 +31,7 @@ from .ai.client import AiClient
 from .ai.ocr import ocr_image
 from .ai.parse import parse_analysis
 from .ai.prompt import PromptSettings, load_prompt_settings
+from .archive import folder_name as archive_folder_name, save_letter
 from .attachments import PrepareLimits, prepare_all
 from .classifiers import ClassifierService, ResolvedCorrespondent, ResolvedTheme
 from .config import AppConfig
@@ -41,6 +40,8 @@ from .journal.mapping import build_card, describe_card
 from .mail.parser import parse_eml
 from .models import (
     Analysis,
+    CardData,
+    InsertedCard,
     MailMessage,
     PreparedAttachment,
     ProcessResult,
@@ -269,7 +270,7 @@ class EmailProcessor:
             card_id=inserted.card_id,
             reg_number=inserted.reg_number,
         )
-        self._archive(mail)
+        self._archive(mail, card, inserted)
         logger.info(
             "Записано в журнал (id=%s): %s", inserted.card_id, describe_card(card)
         )
@@ -499,20 +500,27 @@ class EmailProcessor:
         except Exception:  # noqa: BLE001 - журнал обработки не должен ронять службу
             logger.exception("Не удалось записать ошибку в журнал обработки")
 
-    def _archive(self, mail: MailMessage) -> None:
-        """Сохраняет исходное письмо: журнал учёта без исходника спорить не с чем."""
+    def _archive(
+        self, mail: MailMessage, card: CardData, inserted: InsertedCard
+    ) -> None:
+        """Сохраняет письмо и вложения в папку с номером записи журнала.
+
+        Папка называется по CARD.ID: по номеру записи в журнале всегда можно
+        найти исходное письмо. Вложения кладутся рядом отдельными файлами в
+        исходном формате — их можно открыть, не разбирая .eml.
+        """
         if not self.cfg.processing.save_eml:
             return
         try:
-            folder = self.cfg.processing.archive_dir / dt.date.today().isoformat()
-            folder.mkdir(parents=True, exist_ok=True)
-            name = re.sub(r"[^\w.@-]+", "_", mail.message_id)[:80] or mail.uid or "mail"
-            path = folder / (name + ".eml")
-            path.write_bytes(mail.raw)
-            logger.debug("Исходное письмо сохранено: %s", path)
-        except OSError as exc:
-            # Нет места на диске или прав — запись в журнал уже сделана, это важнее.
-            logger.warning("Не удалось сохранить исходное письмо: %s", exc)
+            folder = archive_folder_name(inserted, card, mail)
+            path = save_letter(mail, self.cfg.processing.archive_dir, folder)
+            logger.info(
+                "Письмо и вложения сохранены: %s (%s вл.)", path, len(mail.attachments)
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Нет места на диске, прав или недопустимое имя — запись в журнал
+            # уже сделана, и это важнее архива.
+            logger.warning("Не удалось сохранить письмо в архив: %s", exc)
 
 
 def _yes_no(value: bool | None) -> str:

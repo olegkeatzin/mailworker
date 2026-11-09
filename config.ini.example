@@ -190,9 +190,10 @@ retry_errors = true
 ; Файл журнала обработки (защита от повторной записи).
 ; В Docker: /app/data/state.sqlite
 state_path = data/state.sqlite
-; Куда складывать исходные письма после записи в журнал.
-; В Docker: /app/data/processed
-archive_dir = data/processed
+; Корневая папка архива: на каждую запись — папка с её номером (CARD.ID),
+; внутри письмо letter.eml и каждое вложение отдельным файлом в исходном формате.
+; В Docker: /app/data
+archive_dir = data
 save_eml = true
 
 [logging]

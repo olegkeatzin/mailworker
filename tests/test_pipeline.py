@@ -100,9 +100,11 @@ def test_successful_registration(env, simple_eml):
     assert result.inserted is not None and result.inserted.card_id == 137
     assert state.counts() == {"registered": 1}
 
-    # Исходное письмо сохранено для разбора спорных случаев.
-    archived = list(cfg.processing.archive_dir.rglob("*.eml"))
-    assert len(archived) == 1
+    # Архив: папка с номером записи, внутри исходное письмо.
+    folder = cfg.processing.archive_dir / "137"
+    assert folder.is_dir()
+    assert (folder / "letter.eml").read_bytes() == simple_eml
+    assert list(cfg.processing.archive_dir.iterdir()) == [folder]
 
 
 def test_second_run_is_duplicate(env, simple_eml):
@@ -115,13 +117,14 @@ def test_second_run_is_duplicate(env, simple_eml):
 
 
 def test_dry_run_writes_nothing(env, simple_eml):
-    _cfg, state, _client, journal, processor = env
+    cfg, state, _client, journal, processor = env
     result = processor.process_raw(simple_eml, uid="1", folder="INBOX", dry_run=True)
 
     assert result.status == STATUS_DRY_RUN
     assert result.card is not None
     assert journal.cards == []
     assert state.counts() == {}
+    assert not cfg.processing.archive_dir.exists()
 
 
 def test_model_refuses_registration(env, simple_eml):
@@ -644,3 +647,52 @@ def test_ai_mode_asks_model_for_decision(workdir):
     assert '"register"' in prompt
     assert '"confidence"' in prompt
     assert '"category"' in prompt
+
+def test_archive_keeps_attachments_in_original_form(workdir):
+    """Вложения сохраняются рядом с письмом отдельными файлами."""
+    cfg = AppConfig.load(make_config(workdir))
+    processor = EmailProcessor(
+        cfg,
+        FakeAiClient(),
+        FakeJournal(),
+        ProcessedState(cfg.processing.state_path),
+    )
+    raw = build_email(
+        attachments=[
+            ("Счёт 45.pdf", "application/pdf", b"%PDF-1.4 test"),
+            ("акт.docx", "application/octet-stream", b"PK\x03\x04docx"),
+        ]
+    )
+
+    result = processor.process_raw(raw, uid="1")
+
+    assert result.status == STATUS_REGISTERED
+    folder = cfg.processing.archive_dir / "137"
+    assert (folder / "letter.eml").read_bytes() == raw
+    assert (folder / "Счёт 45.pdf").read_bytes() == b"%PDF-1.4 test"
+    assert (folder / "акт.docx").read_bytes() == b"PK\x03\x04docx"
+
+
+def test_archive_sanitizes_and_deduplicates_names(workdir):
+    cfg = AppConfig.load(make_config(workdir))
+    processor = EmailProcessor(
+        cfg,
+        FakeAiClient(),
+        FakeJournal(),
+        ProcessedState(cfg.processing.state_path),
+    )
+    raw = build_email(
+        attachments=[
+            ("../evil.txt", "text/plain", b"one"),
+            ("report.txt", "text/plain", b"two"),
+            ("report.txt", "text/plain", b"three"),
+        ]
+    )
+
+    processor.process_raw(raw, uid="1")
+
+    folder = cfg.processing.archive_dir / "137"
+    assert (folder / "evil.txt").read_bytes() == b"one"
+    assert (folder / "report.txt").read_bytes() == b"two"
+    assert (folder / "report-2.txt").read_bytes() == b"three"
+    assert not (workdir / "evil.txt").exists()
