@@ -9,6 +9,7 @@ import poplib
 
 import pytest
 
+import processor.mail.sources as sources
 from processor.config import MailConfig
 from processor.errors import MailSourceError
 from processor.mail.sources import ImapMailSource, Pop3MailSource
@@ -425,3 +426,37 @@ def test_pop3_all_mode_with_window(fake_pop3):
     messages = source.fetch(limit=10)
 
     assert [item.uid for item in messages] == ["UID2"]
+
+def test_window_advances_between_polls(monkeypatch):
+    """Окно считается при каждом опросе: за сутки оно сдвигается вперёд.
+
+    Служба может работать неделями, поэтому дата не должна фиксироваться
+    при старте: иначе окно «за N дней» со временем охватывало бы всё более
+    старые письма.
+    """
+
+    class FakeDate(dt.date):
+        current = dt.date(2026, 11, 9)
+
+        @classmethod
+        def today(cls):
+            return cls.current
+
+    class FakeDt:
+        date = FakeDate
+        timedelta = dt.timedelta
+        datetime = dt.datetime
+
+    monkeypatch.setattr(sources, "dt", FakeDt)
+
+    imap = ImapMailSource(make_mail_cfg(mode="unseen", since_days=2))
+    pop3 = Pop3MailSource(make_mail_cfg(protocol="pop3", port=995, since_days=2))
+
+    assert imap.window_date() == dt.date(2026, 11, 8)
+    assert pop3._since_cutoff() == dt.date(2026, 11, 8)
+
+    # Прошли сутки — окно сдвинулось, на том же объекте источника.
+    FakeDate.current = dt.date(2026, 11, 10)
+
+    assert imap.window_date() == dt.date(2026, 11, 9)
+    assert pop3._since_cutoff() == dt.date(2026, 11, 9)

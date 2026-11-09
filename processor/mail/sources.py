@@ -141,11 +141,13 @@ class ImapMailSource:
         uids = (data[0] or b"").split() if data else []
         # Берём последние: uid растёт вместе с порядком поступления.
         selected = uids[-limit:]
+        window = self.window_date()
         logger.info(
-            "В папке «%s» найдено писем: %s, к обработке: %s",
+            "В папке «%s» найдено писем: %s, к обработке: %s%s",
             self.cfg.mailbox,
             len(uids),
             len(selected),
+            "" if window is None else ", окно с " + window.strftime("%d.%m.%Y"),
         )
 
         messages: list[FetchedMessage] = []

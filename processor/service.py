@@ -163,7 +163,7 @@ def _window_text(cfg: MailConfig) -> str:
         return "окно по дате: без ограничения"
     since = dt.date.today() - dt.timedelta(days=max(0, cfg.since_days - 1))
     return (
-        "окно по дате: последние "
+        "окно по дате на момент запуска: последние "
         + str(cfg.since_days)
         + " дн. (с "
         + since.strftime("%d.%m.%Y")
