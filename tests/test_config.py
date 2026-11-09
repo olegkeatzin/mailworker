@@ -21,7 +21,7 @@ def test_reads_all_sections(workdir):
     assert cfg.mail.mode == "all"
     assert cfg.database.charset == "WIN1251"
     assert cfg.ai.model == "test-model"
-    assert cfg.journal.reg_number == "новая"
+    assert cfg.journal.intindex == "новая"
     assert cfg.journal.storage == "db"
     assert cfg.processing.filter_mode == "ai"
 
@@ -289,3 +289,27 @@ def test_mode_since_days_requires_window(workdir):
     with pytest.raises(ConfigError) as error:
         AppConfig.load(path)
     assert "since_days" in str(error.value)
+
+def test_intindex_value_from_config(workdir):
+    path = make_config(workdir, {"journal": {"intindex": "вх"}})
+    cfg = AppConfig.load(path)
+    assert cfg.journal.intindex == "вх"
+
+
+def test_intindex_legacy_key_still_works(workdir):
+    """Старый ключ reg_number читается, если intindex не задан."""
+    path = make_config(workdir)
+    text = path.read_text(encoding="utf-8").replace(
+        "intindex = новая", "reg_number = вх2"
+    )
+    path.write_text(text, encoding="utf-8")
+
+    cfg = AppConfig.load(path)
+    assert cfg.journal.intindex == "вх2"
+
+
+def test_intindex_cannot_be_empty(workdir):
+    path = make_config(workdir, {"journal": {"intindex": ""}})
+    with pytest.raises(ConfigError) as error:
+        AppConfig.load(path)
+    assert "intindex" in str(error.value)

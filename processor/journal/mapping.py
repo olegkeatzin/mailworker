@@ -64,7 +64,7 @@ def build_card(
 
     return CardData(
         card_type=cfg.card_type,
-        intindex=_limit(cfg.reg_number, cfg.max_intindex_length),
+        intindex=_limit(cfg.intindex, cfg.max_intindex_length),
         intdate=reg_date,
         extindex=_limit(choose_doc_number(cfg, analysis, mail), cfg.max_extindex_length),
         extdate=doc_date,

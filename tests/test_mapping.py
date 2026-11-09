@@ -54,6 +54,12 @@ def test_main_fields(journal_cfg):
     assert card.pages_doc >= 1
 
 
+def test_intindex_from_config(journal_cfg):
+    cfg = dataclasses.replace(journal_cfg, intindex="вх")
+    card = build_card(cfg, make_analysis(), make_mail())
+    assert card.intindex == "вх"
+
+
 def test_reg_date_from_letter(journal_cfg):
     cfg = dataclasses.replace(journal_cfg, reg_date="email_date")
     card = build_card(cfg, make_analysis(), make_mail())

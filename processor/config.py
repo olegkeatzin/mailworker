@@ -130,7 +130,9 @@ class JournalConfig:
     api_url: str = "http://127.0.0.1:8000"
     api_timeout: int = 30
     card_type: int = 1
-    reg_number: str = "новая"
+    #: Значение INTINDEX для всех записей. По умолчанию «новая» (номер
+    #: присваивает система учёта); можно задать своё, например «вх».
+    intindex: str = "новая"
     reg_date: str = "today"
     doc_date_fallback: str = "email_date"
     doc_number_fallback: str = "none"
@@ -369,12 +371,21 @@ def _read_ocr(r: "_Reader", ai: AiConfig) -> OcrConfig:
 
 
 def _read_journal(r: "_Reader") -> JournalConfig:
+    # intindex — основной ключ; reg_number оставлен для старых конфигов.
+    # Различаем «не задано» и «задано пустым»: пустое значение — ошибка,
+    # иначе в INTINDEX уйдёт пустая строка и база откажет.
+    intindex = r.raw("journal", "intindex")
+    if intindex is None:
+        intindex = r.raw("journal", "reg_number")
+    if intindex is None:
+        intindex = "новая"
+
     return JournalConfig(
         storage=r.choice("journal", "storage", "db", STORAGE_MODES),
         api_url=r.text("journal", "api_url", "http://127.0.0.1:8000").rstrip("/"),
         api_timeout=r.integer("journal", "api_timeout", 30, minimum=1, maximum=600),
         card_type=r.integer("journal", "card_type", 1, minimum=0),
-        reg_number=r.text("journal", "reg_number", "новая"),
+        intindex=intindex,
         reg_date=r.choice("journal", "reg_date", "today", REG_DATE_MODES),
         doc_date_fallback=r.choice(
             "journal", "doc_date_fallback", "email_date", DOC_DATE_FALLBACKS
@@ -468,6 +479,10 @@ def _check_cross(
         r.errors.append(
             "[mail] delete_after: удаление писем поддерживается только для POP3 "
             "(для IMAP используйте mark_seen)"
+        )
+    if not journal.intindex.strip():
+        r.errors.append(
+            "[journal] intindex: не может быть пустым — это значение пишется в INTINDEX"
         )
     if mail.mode == "since_days" and mail.since_days < 1:
         r.errors.append(

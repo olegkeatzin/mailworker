@@ -25,7 +25,7 @@ def make_mail(attachments: list[Attachment] | None = None, raw: bytes = b"raw") 
     )
 
 
-def make_card(intindex: str = "новая") -> CardData:
+def make_card(intindex: str = "вх") -> CardData:
     import datetime as dt
 
     return CardData(
@@ -40,21 +40,21 @@ def make_card(intindex: str = "новая") -> CardData:
     )
 
 
-def test_folder_is_record_id():
+def test_folder_is_intindex_plus_record_id():
     inserted = InsertedCard(card_id=137)
-    assert folder_name(inserted, make_card(), make_mail()) == "137"
+    assert folder_name(inserted, make_card(), make_mail()) == "вх137"
 
 
-def test_folder_falls_back_to_registration_number():
-    card = make_card("вх12")
-    assert folder_name(InsertedCard(card_id=None), card, make_mail()) == "вх12"
-    assert folder_name(None, card, make_mail()) == "вх12"
+def test_folder_without_id_uses_intindex():
+    card = make_card("вх")
+    assert folder_name(InsertedCard(card_id=None), card, make_mail()) == "вх"
+    assert folder_name(None, card, make_mail()) == "вх"
 
 
 def test_folder_falls_back_to_message_id_and_is_sanitized():
     mail = make_mail()
     mail.message_id = "a/b:c@test"
-    assert folder_name(None, make_card(), mail) == "a_b_c@test"
+    assert folder_name(None, make_card(intindex=""), mail) == "a_b_c@test"
 
 
 def test_safe_filename_keeps_original_name():

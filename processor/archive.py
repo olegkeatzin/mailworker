@@ -66,16 +66,22 @@ _EXTENSIONS = {
 def folder_name(
     inserted: InsertedCard | None, card: CardData | None, mail: MailMessage
 ) -> str:
-    """Имя папки записи: номер из базы, иначе регистрационный номер или письмо.
+    """Имя папки записи: INTINDEX + CARD.ID.
 
-    Основной источник — идентификатор записи CARD.ID: после регистрации он есть
-    всегда и не меняется. Регистрационный номер (INTINDEX) до присвоения номера
-    системой учёта равен «новая» и для имени папки не годится.
+    Например, при [journal] intindex = вх запись с ID 142 даёт папку «вх142»:
+    INTINDEX берётся из конфига и попадает и в журнал, и в имя папки, а номер
+    записи делает папки уникальными.
+
+    Если идентификатора записи нет (сервис журнала не вернул id), остаётся
+    только INTINDEX; если нет и его — имя письма.
     """
+    prefix = (card.intindex if card is not None else "") or ""
+    prefix = prefix.strip()
+
     if inserted is not None and inserted.card_id not in (None, ""):
-        return _safe_component(str(inserted.card_id))
-    if card is not None and card.intindex and card.intindex.strip().lower() != "новая":
-        return _safe_component(card.intindex)
+        return _safe_component(prefix + str(inserted.card_id))
+    if prefix:
+        return _safe_component(prefix)
     return _safe_component(mail.message_id or mail.uid or "mail")
 
 

@@ -56,7 +56,7 @@ DEFAULT_SECTIONS: dict[str, dict[str, str]] = {
     "ocr": {},
     "journal": {
         "storage": "db",
-        "reg_number": "новая",
+        "intindex": "новая",
         "sheets_mode": "pdf_pages",
     },
     # По умолчанию в тестах справочники выключены: без живой базы их не прочитать.
