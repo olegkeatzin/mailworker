@@ -64,7 +64,9 @@ class MailConfig:
     verify_tls: bool = True
     timeout: int = 60
     mode: str = "unseen"
-    since_days: int = 7
+    #: Окно по дате: N календарных дней, включая сегодня. 0 — без ограничения.
+    #: Действует в любом режиме: и для unseen, и для all (включая POP3).
+    since_days: int = 0
     mark_seen: bool = True
     delete_after: bool = False
     poll_interval: int = 60
@@ -306,7 +308,7 @@ def _read_mail(r: "_Reader", *, require: bool = True) -> MailConfig:
         verify_tls=r.boolean("mail", "verify_tls", True),
         timeout=r.integer("mail", "timeout", 60, minimum=5, maximum=3600),
         mode=r.choice("mail", "mode", "unseen", MAIL_MODES),
-        since_days=r.integer("mail", "since_days", 7, minimum=1, maximum=3650),
+        since_days=r.integer("mail", "since_days", 0, minimum=0, maximum=3650),
         mark_seen=r.boolean("mail", "mark_seen", True),
         delete_after=r.boolean("mail", "delete_after", False),
         poll_interval=r.integer("mail", "poll_interval", 60, minimum=10, maximum=86400),
@@ -465,6 +467,12 @@ def _check_cross(
         r.errors.append(
             "[mail] delete_after: удаление писем поддерживается только для POP3 "
             "(для IMAP используйте mark_seen)"
+        )
+    if mail.mode == "since_days" and mail.since_days < 1:
+        r.errors.append(
+            "[mail] mode = since_days требует since_days ≥ 1. Окно задаётся "
+            "параметром since_days в любом режиме: укажите mode = unseen или all "
+            "и нужное значение since_days."
         )
     if classifiers.enabled:
         # Справочники KORRESP и THEMA лежат в той же базе, что и журнал:

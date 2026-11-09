@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import threading
 from dataclasses import dataclass
@@ -133,12 +134,13 @@ class MailWorkerService:
         """Бесконечный опрос с паузой между проходами."""
         interval = max(10, self.mail_cfg.poll_interval)
         logger.info(
-            "Служба запущена: %s %s:%s, папка «%s», интервал опроса %s с",
+            "Служба запущена: %s %s:%s, папка «%s», интервал опроса %s с, %s",
             self.mail_cfg.protocol.upper(),
             self.mail_cfg.host,
             self.mail_cfg.port,
             self.mail_cfg.mailbox,
             interval,
+            _window_text(self.mail_cfg),
         )
         while not self._stop.is_set():
             try:
@@ -154,3 +156,16 @@ class MailWorkerService:
     def stop(self) -> None:
         """Просит цикл завершиться (вызывается обработчиком сигнала)."""
         self._stop.set()
+
+def _window_text(cfg: MailConfig) -> str:
+    """Окно по дате для стартовой строки лога — чтобы видеть, применилось ли оно."""
+    if cfg.since_days <= 0:
+        return "окно по дате: без ограничения"
+    since = dt.date.today() - dt.timedelta(days=max(0, cfg.since_days - 1))
+    return (
+        "окно по дате: последние "
+        + str(cfg.since_days)
+        + " дн. (с "
+        + since.strftime("%d.%m.%Y")
+        + ")"
+    )

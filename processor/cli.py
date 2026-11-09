@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import logging
 import signal
@@ -438,7 +439,26 @@ def _check_mail(cfg: AppConfig) -> bool:
         return False
     finally:
         source.close()
-    detail = "" if count is None else ", писем по фильтру: " + str(count)
+    if cfg.mail.since_days > 0:
+        since = dt.date.today() - dt.timedelta(days=max(0, cfg.mail.since_days - 1))
+        window = (
+            ", окно с "
+            + since.strftime("%d.%m.%Y")
+            + " ("
+            + str(cfg.mail.since_days)
+            + " дн.)"
+        )
+    else:
+        window = ", окно по дате: без ограничения"
+
+    if count is None:
+        detail = ""
+    elif cfg.mail.protocol == "pop3" and cfg.mail.since_days > 0:
+        # POP3 не умеет искать по дате: окно применяется при обработке.
+        detail = ", писем в ящике: " + str(count) + " (окно фильтруется при обработке)"
+    else:
+        detail = ", писем по фильтру: " + str(count)
+
     print(
         "Почта: OK — "
         + cfg.mail.protocol.upper()
@@ -449,6 +469,7 @@ def _check_mail(cfg: AppConfig) -> bool:
         + ", папка «"
         + cfg.mail.mailbox
         + "»"
+        + window
         + detail
     )
     return True

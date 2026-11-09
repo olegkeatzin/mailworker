@@ -136,6 +136,7 @@ def test_shipped_example_is_valid():
     assert cfg.journal.max_sh_contents_length == 512
     assert cfg.classifiers.enabled is True
     # Ящик с пересланной отобранной почтой — регистрируются все письма.
+    assert cfg.mail.since_days == 0
     assert cfg.processing.filter_mode == "all"
     assert cfg.processing.skip_spam is False
     assert cfg.processing.require_register_flag is True
@@ -268,3 +269,23 @@ def test_admission_settings_are_in_processing(workdir):
     assert cfg.processing.require_register_flag is False
     assert cfg.processing.min_confidence == 0.75
     assert cfg.processing.skip_spam is True
+
+def test_mail_window_defaults_off(workdir):
+    """По умолчанию окно по дате выключено: обрабатывается всё, что попадает под режим."""
+    cfg = AppConfig.load(make_config(workdir))
+    assert cfg.mail.since_days == 0
+
+
+def test_mail_window_with_unseen_mode(workdir):
+    """since_days действует в любом режиме, а не только при mode = since_days."""
+    path = make_config(workdir, {"mail": {"mode": "unseen", "since_days": "1"}})
+    cfg = AppConfig.load(path)
+    assert cfg.mail.mode == "unseen"
+    assert cfg.mail.since_days == 1
+
+
+def test_mode_since_days_requires_window(workdir):
+    path = make_config(workdir, {"mail": {"mode": "since_days", "since_days": "0"}})
+    with pytest.raises(ConfigError) as error:
+        AppConfig.load(path)
+    assert "since_days" in str(error.value)

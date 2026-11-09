@@ -209,20 +209,33 @@ class ImapMailSource:
     # ---------------------------------------------------------------- внутреннее
 
     def _search_criteria(self) -> tuple[str, ...]:
-        if self.cfg.mode == "unseen":
-            return ("UNSEEN",)
-        if self.cfg.mode == "since_days":
-            return ("SINCE", _imap_date(self.since_date()))
-        return ("ALL",)
+        """Критерии IMAP: флаг по режиму плюс окно по дате, если оно задано.
 
-    def since_date(self) -> dt.date:
-        """Первый день окна поиска для mode = since_days.
+        since_days действует независимо от режима: без этого «since_days = 1»
+        при mode = unseen (или all) молча игнорировался, и служба читала всю
+        папку — именно так и происходит с POP3, где поиска по дате нет вовсе.
+        """
+        criteria: list[str] = []
+        if self.cfg.mode == "unseen":
+            criteria.append("UNSEEN")
+        elif self.cfg.mode == "all":
+            criteria.append("ALL")
+        # mode = since_days — устаревший алиас «все письма + окно»: флага нет.
+        window = self.window_date()
+        if window is not None:
+            criteria.extend(["SINCE", _imap_date(window)])
+        if not criteria:
+            criteria.append("ALL")
+        return tuple(criteria)
+
+    def window_date(self) -> dt.date | None:
+        """Первый день окна по дате; None — ограничения нет.
 
         IMAP SINCE включает в результат весь указанный день, поэтому «за N дней»
-        — это today − (N−1): since_days = 1 значит «только сегодня», а не
-        «сегодня и вчера». Раньше вычиталось N, и окно было на день шире, из-за
-        чего при since_days = 1 подхватывались вчерашние письма.
+        — это today − (N−1): since_days = 1 значит «только сегодня».
         """
+        if self.cfg.since_days <= 0:
+            return None
         days_back = max(0, self.cfg.since_days - 1)
         return dt.date.today() - dt.timedelta(days=days_back)
 
@@ -313,13 +326,14 @@ class Pop3MailSource:
                 + str(exc)
             ) from exc
         self._conn = conn
-        if cfg.mode == "since_days":
+        cutoff = self._since_cutoff()
+        if cutoff is not None:
             # POP3 не умеет искать по дате, поэтому окно применяем сами:
             # смотрим заголовок Date и тело старых писем не скачиваем.
             logger.info(
-                "POP3: окно since_days = %s применяется локально по заголовку Date"
-                " (сервер поиск по дате не поддерживает).",
-                cfg.since_days,
+                "POP3: окно — последние %s (с %s), фильтр по заголовку Date.",
+                _days_text(cfg.since_days),
+                cutoff.strftime("%d.%m.%Y"),
             )
         logger.info(
             "Подключено к POP3 %s:%s, писем в ящике: %s",
@@ -329,9 +343,10 @@ class Pop3MailSource:
         )
 
     def fetch(self, limit: int = DEFAULT_BATCH) -> list[FetchedMessage]:
-        """Забирает письма; при mode = since_days старые отбрасываются по Date.
+        """Забирает письма; старые отбрасываются по заголовку Date.
 
-        Протокол POP3 не умеет искать по дате, поэтому окно применяется здесь:
+        Окно задаётся параметром since_days и действует в любом режиме.
+        Протокол POP3 не умеет искать по дате, поэтому фильтр применяется здесь:
         заголовки письма читаются командой TOP (без тела), и если письмо старше
         окна — оно даже не скачивается. Если сервер TOP не поддерживает, письмо
         скачивается целиком, но в обработку не попадает.
@@ -342,7 +357,7 @@ class Pop3MailSource:
         numbers = sorted(self._uid_by_number)[-limit:]
         cutoff = self._since_cutoff()
         logger.info(
-            "К обработке писем: %s из %s%s",
+            "Проверяем писем: %s из %s%s",
             len(numbers),
             len(self._uid_by_number),
             "" if cutoff is None else ", окно с " + cutoff.strftime("%d.%m.%Y"),
@@ -372,16 +387,17 @@ class Pop3MailSource:
 
         if skipped:
             logger.info(
-                "Пропущено писем старше %s (mode = since_days, окно %s дней): %s",
+                "Пропущено писем старше %s (окно since_days = %s): %s",
                 cutoff.strftime("%d.%m.%Y") if cutoff else "",
-                self.cfg.since_days,
+                _days_text(self.cfg.since_days),
                 skipped,
             )
+        logger.info("К обработке: %s", len(messages))
         return messages
 
     def _since_cutoff(self) -> dt.date | None:
-        """Первый день окна: N календарных дней, включая сегодня."""
-        if self.cfg.mode != "since_days":
+        """Первый день окна: N календарных дней, включая сегодня; None — окна нет."""
+        if self.cfg.since_days <= 0:
             return None
         return dt.date.today() - dt.timedelta(days=max(0, self.cfg.since_days - 1))
 
@@ -483,6 +499,20 @@ class Pop3MailSource:
         if self._conn is None:
             raise MailSourceError("Нет соединения с POP3: сначала вызовите connect()")
         return self._conn
+
+
+def _days_text(days: int) -> str:
+    """«1 день», «2 дня», «5 дней» — чтобы в логе было по-русски."""
+    value = abs(int(days))
+    tail = value % 100
+    if 11 <= tail <= 14:
+        return str(value) + " дней"
+    last = value % 10
+    if last == 1:
+        return str(value) + " день"
+    if 2 <= last <= 4:
+        return str(value) + " дня"
+    return str(value) + " дней"
 
 
 def _message_day(raw: bytes) -> dt.date | None:

@@ -148,8 +148,40 @@ def test_since_days_one_means_today_only(fake_imap):
 
 @pytest.mark.parametrize("days, days_back", [(1, 0), (2, 1), (3, 2), (7, 6), (30, 29)])
 def test_since_window_is_calendar_days_including_today(days, days_back):
-    source = ImapMailSource(make_mail_cfg(mode="since_days", since_days=days))
-    assert source.since_date() == dt.date.today() - dt.timedelta(days=days_back)
+    source = ImapMailSource(make_mail_cfg(mode="all", since_days=days))
+    assert source.window_date() == dt.date.today() - dt.timedelta(days=days_back)
+
+
+def test_window_is_off_when_zero(fake_imap):
+    source = ImapMailSource(make_mail_cfg(mode="unseen", since_days=0))
+    assert source.window_date() is None
+    source.connect()
+    source.fetch(limit=1)
+    search = [cmd for cmd in fake_imap.instances[0].commands if cmd[0] == "SEARCH"][0]
+    assert search[2:] == ("UNSEEN",)
+
+
+def test_unseen_mode_with_window(fake_imap):
+    """Окно по дате не зависит от режима: unseen + since_days = 1."""
+    source = ImapMailSource(make_mail_cfg(mode="unseen", since_days=1))
+    source.connect()
+    source.fetch(limit=1)
+
+    search = [cmd for cmd in fake_imap.instances[0].commands if cmd[0] == "SEARCH"][0]
+    assert search[2] == "UNSEEN"
+    assert search[3] == "SINCE"
+    assert search[4] == _imap_day(0)
+
+
+def test_all_mode_with_window(fake_imap):
+    source = ImapMailSource(make_mail_cfg(mode="all", since_days=2))
+    source.connect()
+    source.fetch(limit=1)
+
+    search = [cmd for cmd in fake_imap.instances[0].commands if cmd[0] == "SEARCH"][0]
+    assert search[2] == "ALL"
+    assert search[3] == "SINCE"
+    assert search[4] == _imap_day(1)
 
 
 def test_imap_marks_seen_only_when_asked(fake_imap):
@@ -308,8 +340,25 @@ def test_pop3_without_uidl_uses_numbers(fake_pop3):
     # Номерные идентификаторы тоже устойчивы: берём последнее письмо в ящике.
     assert messages[0].uid == "pop3-2"
 
+def test_pop3_unseen_mode_with_window_skips_old(fake_pop3):
+    """Основной случай: mode = unseen и since_days = 1 — старые письма не читаются.
+
+    POP3 не умеет «непрочитанные», поэтому именно окно по дате ограничивает
+    выборку. Раньше оно терялось, если mode отличался от since_days.
+    """
+    source = Pop3MailSource(
+        make_mail_cfg(protocol="pop3", port=995, mode="unseen", since_days=1)
+    )
+    source.connect()
+
+    messages = source.fetch(limit=10)
+
+    assert [item.uid for item in messages] == ["UID2"]
+    assert fake_pop3.instances[0].retrieved == [2]
+
+
 def test_pop3_since_days_skips_old_messages(fake_pop3):
-    """since_days = 1: вчерашнее письмо не читается и даже не скачивается."""
+    """Старый способ mode = since_days продолжает работать."""
     source = Pop3MailSource(
         make_mail_cfg(protocol="pop3", port=995, mode="since_days", since_days=1)
     )
@@ -360,10 +409,19 @@ def test_pop3_since_days_keeps_message_without_date(fake_pop3):
     assert [item.uid for item in messages] == ["UID2"]
 
 
-def test_pop3_all_mode_ignores_window(fake_pop3):
-    source = Pop3MailSource(make_mail_cfg(protocol="pop3", port=995, mode="all"))
+def test_pop3_without_window_reads_all(fake_pop3):
+    source = Pop3MailSource(make_mail_cfg(protocol="pop3", port=995, mode="all", since_days=0))
     source.connect()
 
     messages = source.fetch(limit=10)
 
     assert [item.uid for item in messages] == ["UID1", "UID2"]
+
+
+def test_pop3_all_mode_with_window(fake_pop3):
+    source = Pop3MailSource(make_mail_cfg(protocol="pop3", port=995, mode="all", since_days=1))
+    source.connect()
+
+    messages = source.fetch(limit=10)
+
+    assert [item.uid for item in messages] == ["UID2"]
