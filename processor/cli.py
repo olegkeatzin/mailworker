@@ -20,6 +20,7 @@ from pathlib import Path
 
 from . import __version__
 from .ai.client import AiClient
+from .archive import build_archive
 from .classifiers import ClassifierService
 from .config import AppConfig
 from .errors import ConfigError, ProcessorError
@@ -330,6 +331,7 @@ def run_check(cfg: AppConfig) -> int:
         _check_ai(cfg),
         _check_journal(cfg),
         _check_classifiers(cfg),
+        _check_archive(cfg),
         _check_mail(cfg),
     ]
 
@@ -423,6 +425,20 @@ def _check_classifiers(cfg: AppConfig) -> bool:
         print("  ВНИМАНИЕ: справочник корреспондентов пуст — сопоставлять не с чем")
     if not service.themes:
         print("  ВНИМАНИЕ: справочник тем пуст — тема всегда будет пустой")
+    return True
+
+
+def _check_archive(cfg: AppConfig) -> bool:
+    """Проверяет, что архив доступен: папка на диске или SMB-шара."""
+    if not cfg.archive.enabled:
+        print("Архив: выключен ([archive] enabled = false)")
+        return True
+    try:
+        target = build_archive(cfg.archive).check()
+    except ProcessorError as exc:
+        print("Архив: ОШИБКА — " + str(exc))
+        return False
+    print("Архив: OK — " + target)
     return True
 
 

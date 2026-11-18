@@ -313,3 +313,86 @@ def test_intindex_cannot_be_empty(workdir):
     with pytest.raises(ConfigError) as error:
         AppConfig.load(path)
     assert "intindex" in str(error.value)
+
+def test_archive_defaults_to_local_and_legacy_processing(workdir):
+    """Без секции [archive] работает старый [processing] archive_dir."""
+    cfg = AppConfig.load(make_config(workdir))
+
+    assert cfg.archive.mode == "local"
+    assert cfg.archive.dir == workdir / "data" / "processed"
+    assert cfg.archive.enabled is True
+
+
+def test_archive_dir_overrides_processing(workdir):
+    path = make_config(workdir, {"archive": {"dir": "share/letters"}})
+    cfg = AppConfig.load(path)
+
+    assert cfg.archive.dir == workdir / "share" / "letters"
+
+
+def test_archive_smb_settings(workdir):
+    path = make_config(
+        workdir,
+        {
+            "archive": {
+                "mode": "smb",
+                "server": "srv-sadko-db",
+                "share": "SadkoAI",
+                "path": "/letters/2026/",
+                "username": "sfs@asup.local",
+                "password": "secret",
+                "domain": "ASUP",
+                "timeout": "30",
+            }
+        },
+    )
+    cfg = AppConfig.load(path)
+
+    assert cfg.archive.mode == "smb"
+    assert cfg.archive.server == "srv-sadko-db"
+    assert cfg.archive.share == "SadkoAI"
+    assert cfg.archive.path == "letters/2026"
+    assert cfg.archive.username == "sfs@asup.local"
+    assert cfg.archive.timeout == 30
+
+
+def test_archive_smb_requires_connection_settings(workdir):
+    path = make_config(workdir, {"archive": {"mode": "smb"}})
+    with pytest.raises(ConfigError) as error:
+        AppConfig.load(path)
+
+    text = str(error.value)
+    assert "[archive] server" in text
+    assert "[archive] share" in text
+    assert "[archive] username" in text
+
+
+def test_archive_can_be_disabled(workdir):
+    path = make_config(workdir, {"archive": {"enabled": "false"}})
+    cfg = AppConfig.load(path)
+
+    assert cfg.archive.enabled is False
+
+
+def test_shipped_example_has_archive_section():
+    cfg = AppConfig.load(EXAMPLE)
+
+    assert cfg.archive.mode == "local"
+    assert cfg.archive.enabled is True
+
+def test_archive_server_and_share_cannot_contain_slash(workdir):
+    path = make_config(
+        workdir,
+        {
+            "archive": {
+                "mode": "smb",
+                "server": "srv/share",
+                "share": "SadkoAI",
+                "username": "u",
+            }
+        },
+    )
+    with pytest.raises(ConfigError) as error:
+        AppConfig.load(path)
+
+    assert "[archive] server" in str(error.value)

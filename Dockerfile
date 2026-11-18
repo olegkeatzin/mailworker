@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # MailWorker: автоматическая обработка почтового ящика в журнал учёта.
-# Образ ставит клиентскую библиотеку Firebird (нужна пакету fdb) и работает
-# от непривилегированного пользователя.
+# Образ ставит клиентскую библиотеку Firebird (нужна пакету fdb), smbclient для
+# сохранения писем на SMB-шару и работает от непривилегированного пользователя.
 
 FROM python:3.12-slim
 
@@ -16,9 +16,10 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     TZ=Europe/Moscow
 
-# libfbclient2 — клиент Firebird для fdb; tzdata — корректные даты регистрации
+# libfbclient2 — клиент Firebird для fdb; tzdata — корректные даты регистрации;
+# smbclient — запись архива на сетевую шару ([archive] mode = smb)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libfbclient2 ca-certificates tzdata \
+ && apt-get install -y --no-install-recommends libfbclient2 ca-certificates tzdata smbclient \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

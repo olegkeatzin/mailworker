@@ -34,6 +34,7 @@ DATE_FORMATS = ("string", "date")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 UNKNOWN_CORRESPONDENT_MODES = ("model", "none", "skip", "create")
 UNKNOWN_THEMA_MODES = ("none", "skip", "create")
+ARCHIVE_MODES = ("local", "smb")
 
 #: Запросы к справочникам по умолчанию. Четыре колонки строго по порядку:
 #: идентификатор, название, часть номера, признак «показывать».
@@ -191,6 +192,31 @@ class ProcessingConfig:
 
 
 @dataclass(frozen=True)
+class ArchiveConfig:
+    """Куда сохранять письма и вложения.
+
+    local — папка на диске (dir), smb — сетевая шара через smbclient. Имя папки
+    записи одинаково в обоих режимах: INTINDEX + CARD.ID (например «вх142»).
+    """
+
+    mode: str = "local"
+    #: Корень архива для mode = local.
+    dir: Path = Path("data")
+    #: Подключение для mode = smb.
+    server: str = ""
+    share: str = ""
+    #: Подпапка внутри шары; пусто — корень шары.
+    path: str = ""
+    username: str = ""
+    password: str = ""
+    domain: str = ""
+    #: Команда smbclient: имя из PATH или полный путь; можно с аргументами.
+    smbclient: str = "smbclient"
+    timeout: int = 120
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class LoggingConfig:
     level: str = "INFO"
     file: Path | None = None
@@ -212,6 +238,7 @@ class AppConfig:
     journal: JournalConfig
     classifiers: ClassifiersConfig
     processing: ProcessingConfig
+    archive: ArchiveConfig
     logging: LoggingConfig
 
     # ------------------------------------------------------------------ разбор
@@ -252,8 +279,9 @@ class AppConfig:
         journal = _read_journal(r)
         classifiers = _read_classifiers(r)
         processing = _read_processing(r)
+        archive = _read_archive(r, processing)
         logging_cfg = _read_logging(r)
-        _check_cross(r, mail, database, journal, classifiers)
+        _check_cross(r, mail, database, journal, classifiers, archive)
 
         if r.errors:
             raise ConfigError(
@@ -270,6 +298,7 @@ class AppConfig:
             journal=journal,
             classifiers=classifiers,
             processing=processing,
+            archive=archive,
             logging=logging_cfg,
         )
 
@@ -442,6 +471,25 @@ def _read_processing(r: "_Reader") -> ProcessingConfig:
     )
 
 
+def _read_archive(r: "_Reader", processing: ProcessingConfig) -> ArchiveConfig:
+    """Секция [archive]; старые [processing] archive_dir/save_eml — запасной вариант."""
+    dir_raw = r.raw("archive", "dir")
+    archive_dir = r.path("archive", "dir", "") if dir_raw else processing.archive_dir
+    return ArchiveConfig(
+        mode=r.choice("archive", "mode", "local", ARCHIVE_MODES),
+        dir=archive_dir,
+        server=r.text("archive", "server"),
+        share=r.text("archive", "share"),
+        path=(r.text("archive", "path") or "").strip().strip("/\\"),
+        username=r.text("archive", "username"),
+        password=r.text("archive", "password"),
+        domain=r.text("archive", "domain"),
+        smbclient=r.text("archive", "smbclient", "smbclient") or "smbclient",
+        timeout=r.integer("archive", "timeout", 120, minimum=5, maximum=3600),
+        enabled=r.boolean("archive", "enabled", processing.save_eml),
+    )
+
+
 def _read_logging(r: "_Reader") -> LoggingConfig:
     file = r.text("logging", "file")
     return LoggingConfig(
@@ -459,6 +507,7 @@ def _check_cross(
     database: DatabaseConfig,
     journal: JournalConfig,
     classifiers: ClassifiersConfig,
+    archive: ArchiveConfig,
 ) -> None:
     """Проверки, которым нужны значения из разных секций."""
     if journal.storage == "db":
@@ -502,6 +551,20 @@ def _check_cross(
             r.errors.append(
                 "[classifiers] correspondents_sql и themes_sql не могут быть пустыми"
             )
+    if archive.mode == "smb" and archive.enabled:
+        if not archive.server:
+            r.errors.append("[archive] server: не задано — сервер SMB (mode = smb)")
+        if not archive.share:
+            r.errors.append("[archive] share: не задано — имя шары SMB (mode = smb)")
+        if not archive.username:
+            r.errors.append("[archive] username: не задано — пользователь SMB (mode = smb)")
+        if not archive.smbclient.strip():
+            r.errors.append("[archive] smbclient: не задано — команда smbclient")
+        for name, value in (("server", archive.server), ("share", archive.share)):
+            if "/" in value or "\\" in value:
+                r.errors.append(
+                    "[archive] " + name + ": не должно содержать «/» или «\\»"
+                )
 
 
 # ---------------------------------------------------------------------- чтение

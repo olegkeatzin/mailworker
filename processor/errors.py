@@ -33,3 +33,7 @@ class AnalysisParseError(ProcessorError):
 
 class StorageError(ProcessorError):
     """Не удалось записать запись в журнал (БД или API)."""
+
+
+class ArchiveError(ProcessorError):
+    """Не удалось сохранить письмо в архив: локальная папка или SMB-шара."""

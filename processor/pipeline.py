@@ -31,7 +31,7 @@ from .ai.client import AiClient
 from .ai.ocr import ocr_image
 from .ai.parse import parse_analysis
 from .ai.prompt import PromptSettings, load_prompt_settings
-from .archive import folder_name as archive_folder_name, save_letter
+from .archive import build_archive, folder_name as archive_folder_name
 from .attachments import PrepareLimits, prepare_all
 from .classifiers import ClassifierService, ResolvedCorrespondent, ResolvedTheme
 from .config import AppConfig
@@ -79,6 +79,8 @@ class EmailProcessor:
         # Без источника справочников сервис работает в режиме «модель как есть»:
         # так удобно тестам, но в рабочем запуске источник подставляет cli.
         self.classifiers = classifiers or ClassifierService(cfg.classifiers)
+        # Архив выбирается один раз: локальная папка или SMB-шара.
+        self.archive = build_archive(cfg.archive)
 
     # ------------------------------------------------------------------ публичное
 
@@ -505,15 +507,16 @@ class EmailProcessor:
     ) -> None:
         """Сохраняет письмо и вложения в папку с номером записи журнала.
 
-        Папка называется по CARD.ID: по номеру записи в журнале всегда можно
-        найти исходное письмо. Вложения кладутся рядом отдельными файлами в
-        исходном формате — их можно открыть, не разбирая .eml.
+        Папка называется по INTINDEX + CARD.ID: по номеру записи в журнале
+        всегда можно найти исходное письмо. Вложения кладутся рядом отдельными
+        файлами в исходном формате — их можно открыть, не разбирая .eml.
+        Место хранения выбирает [archive] mode: папка на диске или SMB-шара.
         """
-        if not self.cfg.processing.save_eml:
+        if not self.cfg.archive.enabled:
             return
         try:
             folder = archive_folder_name(inserted, card, mail)
-            path = save_letter(mail, self.cfg.processing.archive_dir, folder)
+            path = self.archive.save(mail, folder)
             logger.info(
                 "Письмо и вложения сохранены: %s (%s вл.)", path, len(mail.attachments)
             )

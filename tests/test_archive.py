@@ -1,10 +1,24 @@
-"""Архив: имена папок, безопасные имена файлов и раскладка."""
+"""Архив: имена папок, локальная запись и SMB через smbclient."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from types import SimpleNamespace
 
-from processor.archive import folder_name, safe_filename, save_letter
+import pytest
+
+from processor import archive as archive_module
+from processor.archive import (
+    ArchiveError,
+    LocalArchive,
+    SmbArchive,
+    build_archive,
+    folder_name,
+    safe_filename,
+    save_letter,
+)
+from processor.config import ArchiveConfig
 from processor.models import Attachment, CardData, InsertedCard, MailMessage
 
 
@@ -129,3 +143,139 @@ def test_attachment_named_like_letter_gets_suffix(workdir: Path):
 
     assert (folder / "letter.eml").read_bytes() == b"raw"
     assert (folder / "letter-2.eml").read_bytes() == b"inner"
+
+
+# ------------------------------------------------------------------ local / smb
+
+
+def test_local_archive_saves_and_checks(workdir: Path):
+    archive = LocalArchive(workdir / "share")
+    mail = make_mail(
+        attachments=[Attachment(filename="акт.pdf", mime_type="application/pdf", content=b"%PDF")],
+        raw=b"letter",
+    )
+
+    where = archive.save(mail, "вх142")
+    assert where == str(workdir / "share" / "вх142")
+    assert (workdir / "share" / "вх142" / "letter.eml").read_bytes() == b"letter"
+    assert (workdir / "share" / "вх142" / "акт.pdf").read_bytes() == b"%PDF"
+    assert archive.check() == str(workdir / "share")
+
+
+def test_build_archive_chooses_backend():
+    assert isinstance(build_archive(ArchiveConfig()), LocalArchive)
+    assert isinstance(build_archive(ArchiveConfig(mode="smb")), SmbArchive)
+
+
+def _fake_smbclient(monkeypatch, *, returncode=0, stdout="", stderr=""):
+    """Подменяет subprocess.run и запоминает команды, учётные данные и файлы."""
+    captured: dict = {}
+
+    def run(command, **kwargs):
+        captured["command"] = command
+        captured["input"] = kwargs["input"]
+        auth_path = Path(command[command.index("-A") + 1])
+        captured["auth"] = auth_path.read_text(encoding="utf-8")
+        captured["files"] = {}
+        for line in str(kwargs["input"]).splitlines():
+            if line.startswith("put "):
+                quoted = re.findall(r'"([^"]*)"', line)
+                captured["files"][quoted[1]] = Path(quoted[0]).read_bytes()
+        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(archive_module.subprocess, "run", run)
+    return captured
+
+
+def test_smb_path_drops_parent_segments():
+    assert archive_module._path_parts("../letters/./2026") == ["letters", "2026"]
+
+
+def _smb_config(**overrides) -> ArchiveConfig:
+    values = dict(
+        mode="smb",
+        server="srv-sadko-db",
+        share="SadkoAI",
+        path="letters/2026",
+        username="sfs@asup.local",
+        password="secret",
+        domain="ASUP",
+    )
+    values.update(overrides)
+    return ArchiveConfig(**values)
+
+
+def test_smb_archive_uploads_letter_and_attachments(monkeypatch, workdir: Path):
+    monkeypatch.setattr(archive_module.tempfile, "tempdir", str(workdir))
+    captured = _fake_smbclient(monkeypatch)
+    archive = SmbArchive(_smb_config())
+    mail = make_mail(
+        attachments=[
+            Attachment(filename="Счёт 45.pdf", mime_type="application/pdf", content=b"%PDF"),
+            Attachment(filename="Счёт 45.pdf", mime_type="application/pdf", content=b"dup"),
+        ],
+        raw=b"raw-letter",
+    )
+
+    where = archive.save(mail, "вх142")
+
+    assert where == "//srv-sadko-db/SadkoAI/letters/2026/вх142"
+    assert captured["command"][0] == "smbclient"
+    assert "//srv-sadko-db/SadkoAI" in captured["command"]
+    assert "-A" in captured["command"]
+    assert "-N" not in captured["command"]
+    assert "username = sfs@asup.local" in captured["auth"]
+    assert "password = secret" in captured["auth"]
+    assert "domain = ASUP" in captured["auth"]
+
+    commands = captured["input"]
+    assert 'mkdir "letters"' in commands
+    assert 'cd "2026"' in commands
+    assert 'mkdir "вх142"' in commands
+    assert 'cd "вх142"' in commands
+    assert captured["files"]["letter.eml"] == b"raw-letter"
+    assert captured["files"]["Счёт 45.pdf"] == b"%PDF"
+    assert captured["files"]["Счёт 45-2.pdf"] == b"dup"
+
+
+def test_smb_archive_without_password_uses_no_password_flag(monkeypatch, workdir: Path):
+    monkeypatch.setattr(archive_module.tempfile, "tempdir", str(workdir))
+    captured = _fake_smbclient(monkeypatch)
+    archive = SmbArchive(_smb_config(password=""))
+
+    assert archive.check() == "//srv-sadko-db/SadkoAI/letters/2026"
+    assert "-N" in captured["command"]
+    assert captured["input"].strip().endswith("ls")
+
+
+def test_smb_archive_reports_server_error(monkeypatch, workdir: Path):
+    monkeypatch.setattr(archive_module.tempfile, "tempdir", str(workdir))
+    _fake_smbclient(monkeypatch, stdout="NT_STATUS_ACCESS_DENIED listing /")
+    archive = SmbArchive(_smb_config())
+
+    with pytest.raises(ArchiveError) as error:
+        archive.save(make_mail(), "вх1")
+
+    assert "NT_STATUS_ACCESS_DENIED" in str(error.value)
+
+
+def test_smb_archive_ignores_existing_directory(monkeypatch, workdir: Path):
+    monkeypatch.setattr(archive_module.tempfile, "tempdir", str(workdir))
+    _fake_smbclient(
+        monkeypatch, stdout="NT_STATUS_OBJECT_NAME_COLLISION making remote directory"
+    )
+    SmbArchive(_smb_config()).save(make_mail(), "вх1")
+
+
+def test_smb_archive_reports_missing_smbclient(monkeypatch, workdir: Path):
+    monkeypatch.setattr(archive_module.tempfile, "tempdir", str(workdir))
+
+    def run(*_args, **_kwargs):
+        raise FileNotFoundError("smbclient")
+
+    monkeypatch.setattr(archive_module.subprocess, "run", run)
+
+    with pytest.raises(ArchiveError) as error:
+        SmbArchive(_smb_config()).save(make_mail(), "вх1")
+
+    assert "smbclient" in str(error.value)
