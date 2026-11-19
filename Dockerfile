@@ -19,7 +19,7 @@ ENV PYTHONUNBUFFERED=1 \
 # libfbclient2 — клиент Firebird для fdb; tzdata — корректные даты регистрации;
 # smbclient — запись архива на сетевую шару ([archive] mode = smb)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libfbclient2 ca-certificates tzdata smbclient \
+ && apt-get install -y --no-install-recommends libfbclient2 ca-certificates tzdata smbclient catdoc antiword \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

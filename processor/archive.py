@@ -1,21 +1,20 @@
 """Архив обработанных писем: локальная папка или SMB-шара.
 
 Раскладка одинаковая в обоих режимах: папка на каждую запись журнала, имя —
-INTINDEX + CARD.ID (например «вх142»). В папке лежит исходное письмо и каждое
-вложение отдельным файлом в исходном формате:
+только CARD.ID (например «142»), без дополнительных подпапок. В папке лежит
+исходное письмо и вложения отдельными файлами; вложения нумеруются по порядку,
+чтобы длинные исходные имена не попадали в путь:
 
-    //srv-sadko-db/SadkoAI/letters/вх142/
+    //srv-sadko-db/SadkoAI/142/
         letter.eml
-        Счёт 45.pdf
-        акт.docx
+        1.pdf
+        2.docx
 
 Локальный режим пишет напрямую в каталог. Режим smb повторяет пример со
 smbclient: файлы складываются во временный каталог, затем одной сессией
 smbclient создаются подкаталоги (mkdir/cd) и выполняется put. Пароль передаётся
 через временный файл учётных данных (-A), а не в командной строке.
 
-Имена файлов очищаются от символов, недопустимых в путях (в том числе в Windows),
-и от попыток выйти из папки через «..». Совпадающие имена получают суффикс -2, -3.
 Ошибка записи архива не отменяет регистрацию: запись в журнале уже сделана.
 """
 
@@ -47,11 +46,6 @@ LETTER_FILENAME = "letter.eml"
 MAX_NAME_LENGTH = 100
 
 _INVALID_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-_RESERVED_NAMES = frozenset(
-    ["CON", "PRN", "AUX", "NUL"]
-    + ["COM" + str(number) for number in range(1, 10)]
-    + ["LPT" + str(number) for number in range(1, 10)]
-)
 
 #: Расширения для типов, у которых в письме не оказалось имени файла.
 _EXTENSIONS = {
@@ -259,22 +253,16 @@ def build_archive(cfg: ArchiveConfig) -> Archive:
 def folder_name(
     inserted: InsertedCard | None, card: CardData | None, mail: MailMessage
 ) -> str:
-    """Имя папки записи: INTINDEX + CARD.ID.
+    """Имя папки записи: только CARD.ID.
 
-    Например, при [journal] intindex = вх запись с ID 142 даёт папку «вх142»:
-    INTINDEX берётся из конфига и попадает и в журнал, и в имя папки, а номер
-    записи делает папки уникальными.
+    Например, запись с ID 142 даёт папку «142». INTINDEX и имена вложений в
+    путь не попадают: по номеру записи в журнале всегда можно найти архив.
 
     Если идентификатора записи нет (сервис журнала не вернул id), остаётся
-    только INTINDEX; если нет и его — имя письма.
+    Message-ID письма — другого стабильного имени нет.
     """
-    prefix = (card.intindex if card is not None else "") or ""
-    prefix = prefix.strip()
-
     if inserted is not None and inserted.card_id not in (None, ""):
-        return _safe_component(prefix + str(inserted.card_id))
-    if prefix:
-        return _safe_component(prefix)
+        return _safe_component(str(inserted.card_id))
     return _safe_component(mail.message_id or mail.uid or "mail")
 
 
@@ -291,7 +279,7 @@ def save_letter(mail: MailMessage, base_dir: Path, folder: str) -> Path:
 
     used = {letter_path.name.lower()}
     for index, attachment in enumerate(mail.attachments, start=1):
-        name = safe_filename(attachment.filename, attachment.mime_type, index)
+        name = numbered_filename(index, attachment.mime_type, attachment.filename)
         path = _unique_path(target, name, used)
         path.write_bytes(attachment.content)
         used.add(path.name.lower())
@@ -299,28 +287,17 @@ def save_letter(mail: MailMessage, base_dir: Path, folder: str) -> Path:
     return target
 
 
-def safe_filename(filename: str | None, mime_type: str, index: int) -> str:
-    """Имя файла вложения: исходное, но безопасное для файловой системы."""
-    name = (filename or "").replace("\\", "/").split("/")[-1]
-    name = _INVALID_CHARS.sub("_", name).strip(" .")
+def numbered_filename(index: int, mime_type: str, filename: str | None) -> str:
+    """Имя вложения в архиве: порядковый номер и расширение исходного файла.
 
-    if not name:
-        name = "attachment-" + str(index) + _extension_for(mime_type, filename)
-
-    stem, extension = os.path.splitext(name)
+    Полное исходное имя не используется намеренно: длинные имена с пробелами и
+    кириллицей создают проблемы на SMB-шарах и в путях Windows. Расширение
+    сохраняется, поэтому формат файла остаётся понятным.
+    """
+    extension = os.path.splitext(filename or "")[1].lower()
     if not extension:
         extension = _extension_for(mime_type, filename)
-        name = stem + extension
-        stem = stem or "attachment-" + str(index)
-
-    if stem.upper() in _RESERVED_NAMES:
-        stem = "_" + stem
-        name = stem + extension
-
-    if len(name) > MAX_NAME_LENGTH:
-        name = stem[: MAX_NAME_LENGTH - len(extension)] + extension
-
-    return name
+    return str(index) + extension
 
 
 def _stage_files(mail: MailMessage, stage: Path) -> list[tuple[Path, str]]:
@@ -332,24 +309,12 @@ def _stage_files(mail: MailMessage, stage: Path) -> list[tuple[Path, str]]:
     staged: list[tuple[Path, str]] = [(letter, letter.name)]
 
     for index, attachment in enumerate(mail.attachments, start=1):
-        name = safe_filename(attachment.filename, attachment.mime_type, index)
-        name = _unique_name(name, used)
+        name = numbered_filename(index, attachment.mime_type, attachment.filename)
         path = stage / name
         path.write_bytes(attachment.content)
         used.add(name.lower())
         staged.append((path, name))
     return staged
-
-
-def _unique_name(name: str, used: set[str]) -> str:
-    """Свободное имя в наборе: при совпадении добавляет -2, -3 и т. д."""
-    if name.lower() not in used:
-        return name
-    stem, extension = os.path.splitext(name)
-    counter = 2
-    while (stem + "-" + str(counter) + extension).lower() in used:
-        counter += 1
-    return stem + "-" + str(counter) + extension
 
 
 def _path_parts(value: str) -> list[str]:

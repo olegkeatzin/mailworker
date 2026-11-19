@@ -173,17 +173,17 @@ max_name_length = 150
 ; Куда сохранять письма и вложения после записи в журнал:
 ;   local — папка на диске (dir);
 ;   smb   — сетевая шара через smbclient (server, share, path).
-; Имя папки записи одинаково в обоих режимах: INTINDEX + CARD.ID («вх142»),
-; внутри письмо letter.eml и вложения отдельными файлами в исходном формате.
+; Имя папки записи — только CARD.ID (например «142»); INTINDEX и имена
+; вложений в путь не входят: внутри письмо letter.eml и файлы 1.pdf, 2.docx.
 mode = local
 ; Для mode = local: корень архива.
 ; В Docker: /app/data
 dir = data
-; Для mode = smb: сервер, шара и подпапка внутри шары.
-; Пример: server = srv-sadko-db, share = SadkoAI, path = letters
+; Для mode = smb: сервер и шара. Подпапка path необязательна:
+; пусто — архив в корне шары, дальше папка с номером записи (CARD.ID).
 server = srv-sadko-db
 share = SadkoAI
-path = letters
+path =
 ; Учётные данные SMB. Домен можно оставить пустым.
 username = sfs@asup.local
 password =

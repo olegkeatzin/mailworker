@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import io
+import zipfile
+from types import SimpleNamespace
 
 import pytest
 from conftest import build_email
 
+import processor.attachments.word as word_module
 from processor.attachments import PrepareLimits, prepare_all, prepare_attachment
 from processor.attachments.images import image_to_data_url
 from processor.mail.parser import parse_eml
@@ -251,3 +254,111 @@ def test_eml_attachment_without_headers_is_still_read():
     assert prepared.kind == "email"
     assert prepared.handled is True
     assert "not a message at all" in (prepared.extracted_text or "")
+
+# ------------------------------------------------------------ Word: .doc/.rtf/.odt
+
+
+def test_legacy_doc_without_converter_has_clear_note(monkeypatch):
+    monkeypatch.setattr(word_module.shutil, "which", lambda name: None)
+    content = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 512
+
+    prepared = prepare_attachment(
+        attachment("старый.doc", "application/msword", content), LIMITS
+    )
+
+    assert prepared.kind == "doc"
+    assert prepared.handled is False
+    note = prepared.note or ""
+    assert ".doc" in note
+    assert "docx" not in note.lower()
+    assert "catdoc" in note or "antiword" in note
+
+
+def test_legacy_doc_text_via_catdoc(monkeypatch):
+    calls: list[tuple[list[str], bytes]] = []
+
+    monkeypatch.setattr(
+        word_module.shutil,
+        "which",
+        lambda name: "/usr/bin/catdoc" if name == "catdoc" else None,
+    )
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs.get("input")))
+        return SimpleNamespace(
+            returncode=0, stdout="Договор поставки".encode("utf-8"), stderr=b""
+        )
+
+    monkeypatch.setattr(word_module.subprocess, "run", run)
+    content = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 128
+
+    prepared = prepare_attachment(
+        attachment("старый.doc", "application/msword", content), LIMITS
+    )
+
+    assert prepared.extracted_text == "Договор поставки"
+    assert calls and calls[0][0][0] == "/usr/bin/catdoc"
+    assert calls[0][1] == content
+
+
+def test_docx_renamed_to_doc_is_read_as_docx():
+    docx = pytest.importorskip("docx")
+    document = docx.Document()
+    document.add_paragraph("Внутри на самом деле docx")
+    buffer = io.BytesIO()
+    document.save(buffer)
+
+    prepared = prepare_attachment(
+        attachment("переименованный.doc", "application/msword", buffer.getvalue()),
+        LIMITS,
+    )
+
+    assert "Внутри на самом деле docx" in (prepared.extracted_text or "")
+
+
+def test_rtf_text_is_extracted():
+    content = (
+        b"{\\rtf1\\ansi{\\fonttbl{\\f0 Arial;}}"
+        b"\\f0 Hello\\par World \\'c4\\'e8\\'f0}"
+    )
+
+    prepared = prepare_attachment(
+        attachment("письмо.rtf", "application/rtf", content), LIMITS
+    )
+
+    assert prepared.kind == "rtf"
+    text = prepared.extracted_text or ""
+    assert "Hello" in text
+    assert "World" in text
+    assert "Дир" in text
+
+
+def test_odt_text_is_extracted():
+    content_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<office:document-content '
+        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+        "<office:body><office:text>"
+        "<text:p>Договор аренды</text:p>"
+        "<text:p>Сумма 100 000</text:p>"
+        "</office:text></office:body></office:document-content>"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        archive.writestr("content.xml", content_xml)
+
+    prepared = prepare_attachment(
+        attachment(
+            "договор.odt",
+            "application/vnd.oasis.opendocument.text",
+            buffer.getvalue(),
+        ),
+        LIMITS,
+    )
+
+    assert prepared.kind == "odt"
+    text = prepared.extracted_text or ""
+    assert "Договор аренды" in text
+    assert "Сумма 100 000" in text

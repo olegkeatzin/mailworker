@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from ..mail.parser import classify_kind, parse_eml, strip_html
 from ..models import Attachment, PreparedAttachment
-from .docx import docx_parts
+from .word import word_parts
 from .images import guess_mime, image_to_data_url
 from .pdf import pdf_pages_to_images, pdf_text
 from .xlsx import xlsx_text
@@ -88,8 +88,8 @@ def prepare_attachment(
             _prepare_image(attachment, limits, prepared)
         elif kind == "pdf":
             _prepare_pdf(attachment, limits, prepared)
-        elif kind == "docx":
-            _prepare_docx(attachment, limits, prepared)
+        elif kind in ("docx", "doc", "rtf", "odt"):
+            _prepare_word(attachment, limits, prepared)
         elif kind == "xlsx":
             _prepare_xlsx(attachment, limits, prepared)
         elif kind == "text":
@@ -230,8 +230,8 @@ def _prepare_pdf(attachment: Attachment, limits: PrepareLimits, prepared: Prepar
         prepared.note = "; ".join(notes)
 
 
-def _prepare_docx(attachment: Attachment, limits: PrepareLimits, prepared: PreparedAttachment) -> None:
-    parts = docx_parts(attachment.content, with_images=limits.multimodal)
+def _prepare_word(attachment: Attachment, limits: PrepareLimits, prepared: PreparedAttachment) -> None:
+    parts = word_parts(attachment.content, with_images=limits.multimodal)
     prepared.extracted_text = _trim(parts.text, limits.max_text_chars, prepared)
     for image in parts.images:
         data_url = image_to_data_url(image, "image/png")

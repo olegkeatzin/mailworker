@@ -47,7 +47,10 @@ _FORWARD_SUBJECTS = ("fwd:", "fw:", "fwd :", "пересл", "vs:", "wg:", "от
 
 _IMAGE_EXT = re.compile(r"\.(png|jpe?g|gif|webp|tiff?|bmp)$", re.IGNORECASE)
 _PDF_EXT = re.compile(r"\.pdf$", re.IGNORECASE)
-_DOCX_EXT = re.compile(r"\.(docx?|rtf|odt)$", re.IGNORECASE)
+_DOCX_EXT = re.compile(r"\.docx$", re.IGNORECASE)
+_DOC_EXT = re.compile(r"\.doc$", re.IGNORECASE)
+_RTF_EXT = re.compile(r"\.rtf$", re.IGNORECASE)
+_ODT_EXT = re.compile(r"\.odt$", re.IGNORECASE)
 _XLSX_EXT = re.compile(r"\.(xlsx?|ods|csv)$", re.IGNORECASE)
 
 
@@ -313,7 +316,7 @@ def is_forwarded(subject: str, body: str) -> bool:
 
 
 def classify_kind(mime_type: str, filename: str) -> str:
-    """Тип вложения: image | pdf | docx | xlsx | email | text | html | other.
+    """Тип вложения: image | pdf | docx | doc | rtf | odt | xlsx | email | text | html | other.
 
     Порт classifyKind из MailSense: смотрим и MIME, и расширение — отправители
     регулярно присылают .pdf с MIME application/octet-stream.
@@ -327,8 +330,14 @@ def classify_kind(mime_type: str, filename: str) -> str:
         return "image"
     if mime == "application/pdf" or _PDF_EXT.search(name):
         return "pdf"
-    if "wordprocessingml" in mime or mime == "application/msword" or _DOCX_EXT.search(name):
+    if "wordprocessingml" in mime or _DOCX_EXT.search(name):
         return "docx"
+    if mime == "application/msword" or _DOC_EXT.search(name):
+        return "doc"
+    if mime in ("application/rtf", "text/rtf") or _RTF_EXT.search(name):
+        return "rtf"
+    if mime == "application/vnd.oasis.opendocument.text" or _ODT_EXT.search(name):
+        return "odt"
     if "spreadsheetml" in mime or mime == "application/vnd.ms-excel" or _XLSX_EXT.search(name):
         return "xlsx"
     if mime == "message/rfc822" or name.endswith(".eml"):

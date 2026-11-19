@@ -65,7 +65,7 @@ class PreparedAttachment:
 
     filename: str
     mime_type: str
-    kind: str  # image | pdf | docx | xlsx | text | html | other
+    kind: str  # image | pdf | docx | doc | rtf | odt | xlsx | text | html | other
     extracted_text: str | None = None
     images: list[str] = field(default_factory=list)  # data-URL для OCR/vision
     handled: bool = True

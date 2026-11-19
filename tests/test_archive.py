@@ -15,7 +15,7 @@ from processor.archive import (
     SmbArchive,
     build_archive,
     folder_name,
-    safe_filename,
+    numbered_filename,
     save_letter,
 )
 from processor.config import ArchiveConfig
@@ -54,15 +54,15 @@ def make_card(intindex: str = "вх") -> CardData:
     )
 
 
-def test_folder_is_intindex_plus_record_id():
+def test_folder_is_record_id_only():
     inserted = InsertedCard(card_id=137)
-    assert folder_name(inserted, make_card(), make_mail()) == "вх137"
+    assert folder_name(inserted, make_card(), make_mail()) == "137"
 
 
-def test_folder_without_id_uses_intindex():
+def test_folder_without_id_uses_message_id():
     card = make_card("вх")
-    assert folder_name(InsertedCard(card_id=None), card, make_mail()) == "вх"
-    assert folder_name(None, card, make_mail()) == "вх"
+    assert folder_name(InsertedCard(card_id=None), card, make_mail()) == "id@test"
+    assert folder_name(None, card, make_mail()) == "id@test"
 
 
 def test_folder_falls_back_to_message_id_and_is_sanitized():
@@ -71,30 +71,14 @@ def test_folder_falls_back_to_message_id_and_is_sanitized():
     assert folder_name(None, make_card(intindex=""), mail) == "a_b_c@test"
 
 
-def test_safe_filename_keeps_original_name():
-    assert safe_filename("Счёт 45.pdf", "application/pdf", 1) == "Счёт 45.pdf"
+def test_numbered_filename_uses_index_and_extension():
+    assert numbered_filename(1, "application/pdf", "Счёт 45.pdf") == "1.pdf"
+    assert numbered_filename(2, "application/octet-stream", "акт.docx") == "2.docx"
 
 
-def test_safe_filename_strips_paths_and_bad_chars():
-    assert safe_filename("../evil?.txt", "text/plain", 1) == "evil_.txt"
-
-
-def test_safe_filename_adds_extension_from_mime():
-    assert safe_filename("скан", "application/pdf", 1) == "скан.pdf"
-
-
-def test_safe_filename_for_missing_name():
-    assert safe_filename(None, "image/png", 3) == "attachment-3.png"
-
-
-def test_safe_filename_avoids_reserved_names():
-    assert safe_filename("CON.txt", "text/plain", 1) == "_CON.txt"
-
-
-def test_safe_filename_is_limited():
-    name = safe_filename("ж" * 200 + ".pdf", "application/pdf", 1)
-    assert len(name) <= 100
-    assert name.endswith(".pdf")
+def test_numbered_filename_uses_mime_when_extension_missing():
+    assert numbered_filename(3, "image/png", None) == "3.png"
+    assert numbered_filename(4, "application/pdf", "скан") == "4.pdf"
 
 
 def test_save_letter_writes_letter_and_attachments(workdir: Path):
@@ -110,15 +94,15 @@ def test_save_letter_writes_letter_and_attachments(workdir: Path):
 
     assert folder == workdir / "137"
     assert (folder / "letter.eml").read_bytes() == b"raw-letter"
-    assert (folder / "Счёт 45.pdf").read_bytes() == b"%PDF"
-    assert (folder / "акт.docx").read_bytes() == b"PK"
+    assert (folder / "1.pdf").read_bytes() == b"%PDF"
+    assert (folder / "2.docx").read_bytes() == b"PK"
 
 
 def test_save_letter_does_not_overwrite(workdir: Path):
     folder = workdir / "137"
     folder.mkdir()
     (folder / "letter.eml").write_bytes(b"old")
-    (folder / "report.txt").write_bytes(b"old report")
+    (folder / "1.txt").write_bytes(b"old report")
 
     mail = make_mail(
         attachments=[Attachment(filename="report.txt", mime_type="text/plain", content=b"new")],
@@ -128,11 +112,11 @@ def test_save_letter_does_not_overwrite(workdir: Path):
 
     assert (folder / "letter.eml").read_bytes() == b"old"
     assert (folder / "letter-2.eml").read_bytes() == b"new letter"
-    assert (folder / "report.txt").read_bytes() == b"old report"
-    assert (folder / "report-2.txt").read_bytes() == b"new"
+    assert (folder / "1.txt").read_bytes() == b"old report"
+    assert (folder / "1-2.txt").read_bytes() == b"new"
 
 
-def test_attachment_named_like_letter_gets_suffix(workdir: Path):
+def test_attachment_is_numbered_not_named(workdir: Path):
     mail = make_mail(
         attachments=[
             Attachment(filename="letter.eml", mime_type="message/rfc822", content=b"inner")
@@ -142,7 +126,7 @@ def test_attachment_named_like_letter_gets_suffix(workdir: Path):
     folder = save_letter(mail, workdir, "137")
 
     assert (folder / "letter.eml").read_bytes() == b"raw"
-    assert (folder / "letter-2.eml").read_bytes() == b"inner"
+    assert (folder / "1.eml").read_bytes() == b"inner"
 
 
 # ------------------------------------------------------------------ local / smb
@@ -155,10 +139,10 @@ def test_local_archive_saves_and_checks(workdir: Path):
         raw=b"letter",
     )
 
-    where = archive.save(mail, "вх142")
-    assert where == str(workdir / "share" / "вх142")
-    assert (workdir / "share" / "вх142" / "letter.eml").read_bytes() == b"letter"
-    assert (workdir / "share" / "вх142" / "акт.pdf").read_bytes() == b"%PDF"
+    where = archive.save(mail, "142")
+    assert where == str(workdir / "share" / "142")
+    assert (workdir / "share" / "142" / "letter.eml").read_bytes() == b"letter"
+    assert (workdir / "share" / "142" / "1.pdf").read_bytes() == b"%PDF"
     assert archive.check() == str(workdir / "share")
 
 
@@ -196,7 +180,7 @@ def _smb_config(**overrides) -> ArchiveConfig:
         mode="smb",
         server="srv-sadko-db",
         share="SadkoAI",
-        path="letters/2026",
+        path="",
         username="sfs@asup.local",
         password="secret",
         domain="ASUP",
@@ -217,9 +201,9 @@ def test_smb_archive_uploads_letter_and_attachments(monkeypatch, workdir: Path):
         raw=b"raw-letter",
     )
 
-    where = archive.save(mail, "вх142")
+    where = archive.save(mail, "142")
 
-    assert where == "//srv-sadko-db/SadkoAI/letters/2026/вх142"
+    assert where == "//srv-sadko-db/SadkoAI/142"
     assert captured["command"][0] == "smbclient"
     assert "//srv-sadko-db/SadkoAI" in captured["command"]
     assert "-A" in captured["command"]
@@ -229,13 +213,11 @@ def test_smb_archive_uploads_letter_and_attachments(monkeypatch, workdir: Path):
     assert "domain = ASUP" in captured["auth"]
 
     commands = captured["input"]
-    assert 'mkdir "letters"' in commands
-    assert 'cd "2026"' in commands
-    assert 'mkdir "вх142"' in commands
-    assert 'cd "вх142"' in commands
+    assert "mkdir" in commands and 'mkdir "142"' in commands
+    assert 'cd "142"' in commands
     assert captured["files"]["letter.eml"] == b"raw-letter"
-    assert captured["files"]["Счёт 45.pdf"] == b"%PDF"
-    assert captured["files"]["Счёт 45-2.pdf"] == b"dup"
+    assert captured["files"]["1.pdf"] == b"%PDF"
+    assert captured["files"]["2.pdf"] == b"dup"
 
 
 def test_smb_archive_without_password_uses_no_password_flag(monkeypatch, workdir: Path):
@@ -243,7 +225,7 @@ def test_smb_archive_without_password_uses_no_password_flag(monkeypatch, workdir
     captured = _fake_smbclient(monkeypatch)
     archive = SmbArchive(_smb_config(password=""))
 
-    assert archive.check() == "//srv-sadko-db/SadkoAI/letters/2026"
+    assert archive.check() == "//srv-sadko-db/SadkoAI"
     assert "-N" in captured["command"]
     assert captured["input"].strip().endswith("ls")
 
