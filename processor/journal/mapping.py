@@ -173,6 +173,22 @@ def _pdf_pages(prepared: list[PreparedAttachment]) -> int:
     return max(1, len(prepared))
 
 
+def card_snapshot(card: CardData) -> dict:
+    """Поля CARD, которые пишет служба, — для панели и журнала пересканирования."""
+    return {
+        "CARD_TYPE": card.card_type,
+        "INTINDEX": card.intindex,
+        "INTDATE": card.intdate.isoformat() if card.intdate else "",
+        "EXTINDEX": card.extindex,
+        "EXTDATE": card.extdate.isoformat() if card.extdate else "",
+        "SH_CONTENTS": card.sh_contents,
+        "PAGES_DOC": card.pages_doc,
+        "KORRESP": card.korresp,
+        "KORRESPID": card.korrespid,
+        "THEMA": card.thema,
+    }
+
+
 def describe_card(card: CardData) -> str:
     """Короткая строка записи для журнала работы службы."""
     date_text = card.extdate.strftime("%d.%m.%Y") if card.extdate else "без даты"

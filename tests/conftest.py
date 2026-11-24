@@ -68,8 +68,14 @@ DEFAULT_SECTIONS: dict[str, dict[str, str]] = {
         "filter_mode": "ai",
         "skip_spam": "true",
         "state_path": "data/state.sqlite",
-        "archive_dir": "data/processed",
-        "save_eml": "true",
+        "on_attachment_problem": "register",
+    },
+    "archive": {
+        # Без живой шары: тесты архива подменяют smbclient и fdb.
+        "enabled": "false",
+    },
+    "ui": {
+        "enabled": "false",
     },
     "logging": {
         "level": "INFO",

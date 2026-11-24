@@ -80,11 +80,13 @@ class MailWorkerService:
         processor: EmailProcessor,
         source_factory=build_source,
         mail_cfg: MailConfig | None = None,
+        processor_factory=None,
     ) -> None:
         self.cfg = cfg
         self.processor = processor
         self.source_factory = source_factory
         self.mail_cfg = mail_cfg or cfg.mail
+        self.processor_factory = processor_factory or (lambda: processor)
         self._stop = threading.Event()
 
     # ------------------------------------------------------------------- проход
@@ -142,14 +144,26 @@ class MailWorkerService:
             interval,
             _window_text(self.mail_cfg),
         )
-        while not self._stop.is_set():
-            try:
-                self.run_once()
-            except Exception:  # noqa: BLE001 - цикл не должен умирать
-                logger.exception("Проход завершился ошибкой, продолжаем работу")
-            # wait вместо sleep: остановка по сигналу не ждёт конца паузы.
-            if self._stop.wait(interval):
-                break
+        ui_server = None
+        try:
+            from .ui import start_ui
+
+            ui_server = start_ui(self.cfg, self.processor_factory)
+        except Exception:  # noqa: BLE001 - панель не должна ронять опрос
+            logger.exception("Не удалось запустить веб-панель")
+
+        try:
+            while not self._stop.is_set():
+                try:
+                    self.run_once()
+                except Exception:  # noqa: BLE001 - цикл не должен умирать
+                    logger.exception("Проход завершился ошибкой, продолжаем работу")
+                # wait вместо sleep: остановка по сигналу не ждёт конца паузы.
+                if self._stop.wait(interval):
+                    break
+        finally:
+            if ui_server is not None:
+                ui_server.stop()
 
         logger.info("Служба остановлена")
 

@@ -100,11 +100,11 @@ def test_successful_registration(env, simple_eml):
     assert result.inserted is not None and result.inserted.card_id == 137
     assert state.counts() == {"registered": 1}
 
-    # Архив: папка с номером записи, внутри исходное письмо.
-    folder = cfg.processing.archive_dir / "137"
-    assert folder.is_dir()
-    assert (folder / "letter.eml").read_bytes() == simple_eml
-    assert list(cfg.processing.archive_dir.iterdir()) == [folder]
+    # Архив в тестах выключен, но качество и снимок CARD сохранены в state.
+    record = state.get("imap|inbox@test|INBOX|test-message-1@example.ru")
+    assert record is not None
+    assert record["quality"] == "ok"
+    assert record["card_json"]
 
 
 def test_second_run_is_duplicate(env, simple_eml):
@@ -124,7 +124,6 @@ def test_dry_run_writes_nothing(env, simple_eml):
     assert result.card is not None
     assert journal.cards == []
     assert state.counts() == {}
-    assert not cfg.processing.archive_dir.exists()
 
 
 def test_model_refuses_registration(env, simple_eml):
@@ -647,52 +646,3 @@ def test_ai_mode_asks_model_for_decision(workdir):
     assert '"register"' in prompt
     assert '"confidence"' in prompt
     assert '"category"' in prompt
-
-def test_archive_keeps_attachments_numbered(workdir):
-    """Вложения сохраняются рядом с письмом отдельными файлами с номерами."""
-    cfg = AppConfig.load(make_config(workdir))
-    processor = EmailProcessor(
-        cfg,
-        FakeAiClient(),
-        FakeJournal(),
-        ProcessedState(cfg.processing.state_path),
-    )
-    raw = build_email(
-        attachments=[
-            ("Счёт 45.pdf", "application/pdf", b"%PDF-1.4 test"),
-            ("акт.docx", "application/octet-stream", b"PK\x03\x04docx"),
-        ]
-    )
-
-    result = processor.process_raw(raw, uid="1")
-
-    assert result.status == STATUS_REGISTERED
-    folder = cfg.processing.archive_dir / "137"
-    assert (folder / "letter.eml").read_bytes() == raw
-    assert (folder / "1.pdf").read_bytes() == b"%PDF-1.4 test"
-    assert (folder / "2.docx").read_bytes() == b"PK\x03\x04docx"
-
-
-def test_archive_numbers_attachments_in_order(workdir):
-    cfg = AppConfig.load(make_config(workdir))
-    processor = EmailProcessor(
-        cfg,
-        FakeAiClient(),
-        FakeJournal(),
-        ProcessedState(cfg.processing.state_path),
-    )
-    raw = build_email(
-        attachments=[
-            ("../evil.txt", "text/plain", b"one"),
-            ("report.txt", "text/plain", b"two"),
-            ("report.txt", "text/plain", b"three"),
-        ]
-    )
-
-    processor.process_raw(raw, uid="1")
-
-    folder = cfg.processing.archive_dir / "137"
-    assert (folder / "1.txt").read_bytes() == b"one"
-    assert (folder / "2.txt").read_bytes() == b"two"
-    assert (folder / "3.txt").read_bytes() == b"three"
-    assert not (workdir / "evil.txt").exists()

@@ -165,21 +165,10 @@ themes_in_prompt = 300
 max_name_length = 150
 
 [archive]
-; Куда сохранять письма и вложения после записи в журнал:
-;   local — папка на диске (dir);
-;   smb   — сетевая шара через smbclient (server, share, path).
-; Имя папки записи — только CARD.ID (например «142»); INTINDEX и имена
-; вложений в путь не входят: внутри письмо letter.eml и файлы 1.pdf, 2.docx.
-mode = local
-; Для mode = local: корень архива.
-; В Docker: /app/data
-dir = data
-; Для mode = smb: сервер и шара. Подпапка path необязательна:
-; пусто — архив в корне шары, дальше папка с номером записи (CARD.ID).
+; Файлы сохраняются на SMB-шару: FILES/<CARD.ID>/S<SCANNED.ID><ext>,
+; на каждый файл создаётся строка SCANNED. Локального режима больше нет.
 server = srv-sadko-db
 share = SadkoAI
-path =
-; Учётные данные SMB. Домен можно оставить пустым.
 username = sfs@asup.local
 password =
 domain =
@@ -187,9 +176,23 @@ domain =
 ; В Docker smbclient уже установлен.
 smbclient = smbclient
 timeout = 120
-; Сохранять письма в архив. Старый [processing] save_eml тоже читается.
+; Сохранять письма в архив (выключить — файлы не пишутся, SCANNED не заполняется).
 enabled = true
+; Корень на шаре и таблица/генератор журнала сканов.
+files_root = FILES
+scanned_table = SCANNED
+scanned_generator = ID_SCANNED
+scanned_card_type = 0
 
+[ui]
+; Веб-панель очереди. Запускается вместе со службой.
+; Включайте после того, как зададите пароль.
+enabled = false
+host = 0.0.0.0
+port = 8080
+username = admin
+password =
+session_hours = 12
 [processing]
 ; ЧТО РЕГИСТРИРОВАТЬ. Это главная настройка отбора:
 ;   all              — все письма (ящик, куда пересылают уже отобранную почту);
@@ -213,10 +216,10 @@ retry_errors = true
 ; Файл журнала обработки (защита от повторной записи).
 ; В Docker: /app/data/state.sqlite
 state_path = data/state.sqlite
-; Устарело: архив настраивается в секции [archive]. Эти два ключа оставлены
-; для старых конфигов и читаются, только если [archive] dir/enabled не заданы.
-archive_dir = data
-save_eml = true
+; Что делать, если вложение не прочитано:
+; register — записать (качество degraded), skip — не регистрировать,
+; error — ошибка и повтор при следующем проходе.
+on_attachment_problem = register
 
 [logging]
 ; DEBUG, INFO, WARNING, ERROR

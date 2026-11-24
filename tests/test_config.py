@@ -34,7 +34,6 @@ def test_missing_file_is_explained(workdir):
 def test_relative_paths_are_relative_to_ini(workdir):
     cfg = AppConfig.load(make_config(workdir))
     assert cfg.processing.state_path == workdir / "data" / "state.sqlite"
-    assert cfg.processing.archive_dir == workdir / "data" / "processed"
 
 
 def test_all_errors_reported_at_once(workdir):
@@ -284,20 +283,12 @@ def test_intindex_cannot_be_empty(workdir):
         AppConfig.load(path)
     assert "intindex" in str(error.value)
 
-def test_archive_defaults_to_local_and_legacy_processing(workdir):
-    """Без секции [archive] работает старый [processing] archive_dir."""
+
+def test_archive_defaults_disabled_in_tests(workdir):
     cfg = AppConfig.load(make_config(workdir))
 
-    assert cfg.archive.mode == "local"
-    assert cfg.archive.dir == workdir / "data" / "processed"
-    assert cfg.archive.enabled is True
-
-
-def test_archive_dir_overrides_processing(workdir):
-    path = make_config(workdir, {"archive": {"dir": "share/letters"}})
-    cfg = AppConfig.load(path)
-
-    assert cfg.archive.dir == workdir / "share" / "letters"
+    assert cfg.archive.enabled is False
+    assert cfg.archive.server == ""
 
 
 def test_archive_smb_settings(workdir):
@@ -305,29 +296,31 @@ def test_archive_smb_settings(workdir):
         workdir,
         {
             "archive": {
-                "mode": "smb",
+                "enabled": "true",
                 "server": "srv-sadko-db",
                 "share": "SadkoAI",
-                "path": "/letters/2026/",
                 "username": "sfs@asup.local",
                 "password": "secret",
                 "domain": "ASUP",
                 "timeout": "30",
+                "files_root": "FILES",
+                "scanned_generator": "ID_SCANNED",
             }
         },
     )
     cfg = AppConfig.load(path)
 
-    assert cfg.archive.mode == "smb"
+    assert cfg.archive.enabled is True
     assert cfg.archive.server == "srv-sadko-db"
     assert cfg.archive.share == "SadkoAI"
-    assert cfg.archive.path == "letters/2026"
     assert cfg.archive.username == "sfs@asup.local"
     assert cfg.archive.timeout == 30
+    assert cfg.archive.files_root == "FILES"
+    assert cfg.archive.scanned_generator == "ID_SCANNED"
 
 
-def test_archive_smb_requires_connection_settings(workdir):
-    path = make_config(workdir, {"archive": {"mode": "smb"}})
+def test_archive_requires_connection_settings(workdir):
+    path = make_config(workdir, {"archive": {"enabled": "true"}})
     with pytest.raises(ConfigError) as error:
         AppConfig.load(path)
 
@@ -347,15 +340,17 @@ def test_archive_can_be_disabled(workdir):
 def test_shipped_example_has_archive_section():
     cfg = AppConfig.load(EXAMPLE)
 
-    assert cfg.archive.mode == "local"
     assert cfg.archive.enabled is True
+    assert cfg.archive.server == "srv-sadko-db"
+    assert cfg.archive.files_root == "FILES"
+
 
 def test_archive_server_and_share_cannot_contain_slash(workdir):
     path = make_config(
         workdir,
         {
             "archive": {
-                "mode": "smb",
+                "enabled": "true",
                 "server": "srv/share",
                 "share": "SadkoAI",
                 "username": "u",

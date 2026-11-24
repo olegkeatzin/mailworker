@@ -22,6 +22,7 @@ filter_mode = ai — тогда решение принимает модель (
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -31,12 +32,13 @@ from .ai.client import AiClient
 from .ai.ocr import ocr_image
 from .ai.parse import parse_analysis
 from .ai.prompt import PromptSettings, load_prompt_settings
-from .archive import build_archive, folder_name as archive_folder_name
+from .scanner import ArchiveOutcome, ArchiveWorker
+from .spool import Spool
 from .attachments import PrepareLimits, prepare_all
 from .classifiers import ClassifierService, ResolvedCorrespondent, ResolvedTheme
 from .config import AppConfig
 from .errors import AiError, AnalysisParseError, MailParseError, StorageError
-from .journal.mapping import build_card, describe_card
+from .journal.mapping import build_card, card_snapshot, describe_card
 from .mail.parser import parse_eml
 from .models import (
     Analysis,
@@ -79,8 +81,8 @@ class EmailProcessor:
         # Без источника справочников сервис работает в режиме «модель как есть»:
         # так удобно тестам, но в рабочем запуске источник подставляет cli.
         self.classifiers = classifiers or ClassifierService(cfg.classifiers)
-        # Архив выбирается один раз: локальная папка или SMB-шара.
-        self.archive = build_archive(cfg.archive)
+        self.archive_worker = ArchiveWorker(cfg, state)
+        self.spool = Spool(cfg.processing.state_path.parent / "spool")
 
     # ------------------------------------------------------------------ публичное
 
@@ -264,15 +266,51 @@ class EmailProcessor:
                 seconds=time.monotonic() - started,
             )
 
+        quality, warnings = self._quality(prepared)
+        if warnings and self.cfg.processing.on_attachment_problem == "skip":
+            return self._skip(
+                mail,
+                key,
+                analysis,
+                "вложения не прочитаны: " + warnings[0]["note"],
+                dry_run,
+                started,
+            )
+        if warnings and self.cfg.processing.on_attachment_problem == "error":
+            raise StorageError(
+                "вложения не прочитаны: " + warnings[0]["note"]
+            )
+
         inserted = self.journal.insert_card(card, analysis)
+        # Исходник нужен для повторной архивации и пересканирования.
+        self.spool.save(key, mail.raw)
+        snapshot = json.dumps(card_snapshot(card), ensure_ascii=False)
+        warnings_json = json.dumps(warnings, ensure_ascii=False) if warnings else ""
         self.state.mark_registered(
             key,
             message_id=mail.message_id,
             uid=mail.uid,
             card_id=inserted.card_id,
             reg_number=inserted.reg_number,
+            subject=mail.subject,
+            from_display=mail.from_display,
+            quality=quality,
+            warnings=warnings_json,
+            card_json=snapshot,
         )
-        self._archive(mail, card, inserted)
+        outcome = self._archive(mail, card, inserted, key)
+        if not outcome.ok:
+            problems = [
+                {"file": "архив", "kind": "archive", "note": error}
+                for error in outcome.errors
+            ]
+            self.state.set_quality(
+                key,
+                "degraded" if quality == "ok" else quality,
+                json.dumps(warnings + problems, ensure_ascii=False),
+            )
+        else:
+            self.spool.delete(key)
         logger.info(
             "Записано в журнал (id=%s): %s", inserted.card_id, describe_card(card)
         )
@@ -503,27 +541,134 @@ class EmailProcessor:
             logger.exception("Не удалось записать ошибку в журнал обработки")
 
     def _archive(
-        self, mail: MailMessage, card: CardData, inserted: InsertedCard
-    ) -> None:
-        """Сохраняет письмо и вложения в папку с номером записи журнала.
-
-        Папка называется по INTINDEX + CARD.ID: по номеру записи в журнале
-        всегда можно найти исходное письмо. Вложения кладутся рядом отдельными
-        файлами в исходном формате — их можно открыть, не разбирая .eml.
-        Место хранения выбирает [archive] mode: папка на диске или SMB-шара.
-        """
+        self, mail: MailMessage, card: CardData, inserted: InsertedCard, key: str
+    ) -> ArchiveOutcome:
+        """Сохраняет .eml и вложения в FILES/<CARD.ID>/ с записью в SCANNED."""
         if not self.cfg.archive.enabled:
-            return
-        try:
-            folder = archive_folder_name(inserted, card, mail)
-            path = self.archive.save(mail, folder)
-            logger.info(
-                "Письмо и вложения сохранены: %s (%s вл.)", path, len(mail.attachments)
+            return ArchiveOutcome()
+        if inserted.card_id is None:
+            return ArchiveOutcome(
+                failed=1, errors=["журнал не вернул CARD.ID — некуда сохранять файлы"]
             )
-        except Exception as exc:  # noqa: BLE001
-            # Нет места на диске, прав или недопустимое имя — запись в журнал
-            # уже сделана, и это важнее архива.
-            logger.warning("Не удалось сохранить письмо в архив: %s", exc)
+        outcome = self.archive_worker.archive_letter(mail, int(inserted.card_id), key)
+        if outcome.ok:
+            logger.info(
+                "Письмо и вложения сохранены: //%s/%s/%s/ (файлов: %s)",
+                self.cfg.archive.server,
+                self.cfg.archive.share,
+                self.cfg.archive.files_root + "/" + str(inserted.card_id),
+                outcome.uploaded,
+            )
+        else:
+            logger.warning(
+                "Архив сохранён частично: %s из %s, ошибок: %s",
+                outcome.uploaded,
+                outcome.uploaded + outcome.failed,
+                "; ".join(outcome.errors),
+            )
+        return outcome
+
+    def _quality(self, prepared) -> tuple[str, list[dict]]:
+        """Качество разбора: degraded, если хоть одно вложение не прочитано."""
+        warnings: list[dict] = []
+        for attachment in prepared:
+            if attachment.note or not attachment.handled:
+                warnings.append(
+                    {
+                        "file": attachment.filename,
+                        "kind": attachment.kind,
+                        "note": attachment.note or "не обработано",
+                    }
+                )
+        return ("degraded" if warnings else "ok"), warnings
+
+    # ------------------------------------------------------------ пересканирование
+
+    def rescan_card(self, card_id: int) -> ProcessResult:
+        """Заново разбирает письмо из spool и перезаписывает существующий CARD."""
+        started = time.monotonic()
+        record = self.state.letter_by_card(card_id)
+        if record is None:
+            raise StorageError("Нет записи в state.sqlite для CARD.ID=" + str(card_id))
+        key = record["key"]
+        raw = self.spool.load(key)
+        if raw is None:
+            raise StorageError(
+                "Нет исходного .eml в spool для CARD.ID=" + str(card_id)
+                + " — пересканирование невозможно"
+            )
+        mail = parse_eml(raw)
+        self.classifiers.ensure_loaded()
+        prepared = prepare_all(
+            mail.attachments,
+            PrepareLimits(
+                ocr_max_pages=self.cfg.ai.ocr_max_pages,
+                text_max_pages=self.cfg.ai.text_max_pages,
+                max_text_chars=self.cfg.ai.max_text_chars,
+                multimodal=self.cfg.ai.multimodal and self.cfg.ai.model != "",
+            ),
+            skip_inline_images=self.cfg.processing.skip_inline_images,
+            min_inline_image_bytes=self.cfg.processing.min_inline_image_bytes,
+        )
+        ocr_texts = self._ocr_stage(mail, prepared)
+        input_data = self._build_input(mail, prepared, ocr_texts)
+        analysis = parse_analysis(
+            analyze_email(self.client, self.cfg.ai, input_data, self.prompt),
+            model_used=self.cfg.ai.model,
+        )
+        correspondent = self.classifiers.resolve_correspondent(analysis, mail, create=False)
+        theme = self.classifiers.resolve_theme(analysis, create=False)
+        card = build_card(
+            self.cfg.journal,
+            analysis,
+            mail,
+            prepared,
+            correspondent=correspondent,
+            theme=theme,
+        )
+        self.journal.update_card(card, int(card_id))
+
+        quality, warnings = self._quality(prepared)
+        snapshot = json.dumps(card_snapshot(card), ensure_ascii=False)
+        warnings_json = json.dumps(warnings, ensure_ascii=False) if warnings else ""
+        self.state.mark_registered(
+            key,
+            message_id=record["message_id"] or mail.message_id,
+            uid=record["uid"] or mail.uid,
+            card_id=card_id,
+            reg_number=record["reg_number"],
+            subject=mail.subject,
+            from_display=mail.from_display,
+            quality=quality,
+            warnings=warnings_json,
+            card_json=snapshot,
+        )
+        outcome = self._archive(mail, card, InsertedCard(card_id=card_id), key)
+        if not outcome.ok:
+            problems = [
+                {"file": "архив", "kind": "archive", "note": error}
+                for error in outcome.errors
+            ]
+            self.state.set_quality(
+                key, "degraded", json.dumps(warnings + problems, ensure_ascii=False)
+            )
+        else:
+            self.spool.delete(key)
+        self.state.log_rescan(card_id, key, record.get("card_json") or "", snapshot)
+        logger.info("Пересканирование CARD.ID=%s завершено: %s", card_id, describe_card(card))
+        return ProcessResult(
+            status=STATUS_REGISTERED,
+            message_id=mail.message_id,
+            card=card,
+            analysis=analysis,
+            inserted=InsertedCard(card_id=card_id, reg_number=record["reg_number"]),
+            reason="пересканировано и перезаписано",
+            seconds=time.monotonic() - started,
+        )
+
+    def retry_archive(self, limit: int = 100) -> ArchiveOutcome:
+        """Повторяет незагруженные файлы из spool, не меняя CARD."""
+        return self.archive_worker.retry_files(limit)
 
 
 def _yes_no(value: bool | None) -> str:

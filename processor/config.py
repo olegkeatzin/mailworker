@@ -33,7 +33,7 @@ DATE_FORMATS = ("string", "date")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 UNKNOWN_CORRESPONDENT_MODES = ("model", "none", "skip", "create")
 UNKNOWN_THEMA_MODES = ("none", "skip", "create")
-ARCHIVE_MODES = ("local", "smb")
+ATTACHMENT_PROBLEM_MODES = ("register", "skip", "error")
 
 #: Запросы к справочникам по умолчанию. Четыре колонки строго по порядку:
 #: идентификатор, название, часть номера, признак «показывать».
@@ -182,27 +182,21 @@ class ProcessingConfig:
     min_inline_image_bytes: int = 30000
     retry_errors: bool = True
     state_path: Path = Path("data/state.sqlite")
-    #: Корень архива: на каждую запись — папка с её номером (CARD.ID).
-    archive_dir: Path = Path("data")
-    save_eml: bool = True
+    #: Что делать, если вложение не прочитано: register — записать как есть
+    #: (качество degraded), skip — не регистрировать, error — ошибка и повтор.
+    on_attachment_problem: str = "register"
 
 
 @dataclass(frozen=True)
 class ArchiveConfig:
-    """Куда сохранять письма и вложения.
+    """Файловый архив на SMB-шаре и записи SCANNED.
 
-    local — папка на диске (dir), smb — сетевая шара через smbclient. Имя папки
-    записи одинаково в обоих режимах: INTINDEX + CARD.ID (например «вх142»).
+    Каждый файл (письмо .eml и каждое вложение) сохраняется как
+    FILES/<CARD.ID>/S<SCANNED.ID><ext> и описывается строкой в SCANNED.
     """
 
-    mode: str = "local"
-    #: Корень архива для mode = local.
-    dir: Path = Path("data")
-    #: Подключение для mode = smb.
     server: str = ""
     share: str = ""
-    #: Подпапка внутри шары; пусто — корень шары.
-    path: str = ""
     username: str = ""
     password: str = ""
     domain: str = ""
@@ -210,6 +204,23 @@ class ArchiveConfig:
     smbclient: str = "smbclient"
     timeout: int = 120
     enabled: bool = True
+    #: Корень на шаре и таблица/генератор журнала сканов.
+    files_root: str = "FILES"
+    scanned_table: str = "SCANNED"
+    scanned_generator: str = "ID_SCANNED"
+    scanned_card_type: int = 0
+
+
+@dataclass(frozen=True)
+class UiConfig:
+    """Веб-панель очереди: запускается вместе со службой."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+    username: str = "admin"
+    password: str = ""
+    session_hours: int = 12
 
 
 @dataclass(frozen=True)
@@ -235,6 +246,7 @@ class AppConfig:
     classifiers: ClassifiersConfig
     processing: ProcessingConfig
     archive: ArchiveConfig
+    ui: UiConfig
     logging: LoggingConfig
 
     # ------------------------------------------------------------------ разбор
@@ -275,9 +287,10 @@ class AppConfig:
         journal = _read_journal(r)
         classifiers = _read_classifiers(r)
         processing = _read_processing(r)
-        archive = _read_archive(r, processing)
+        archive = _read_archive(r)
+        ui = _read_ui(r, archive)
         logging_cfg = _read_logging(r)
-        _check_cross(r, mail, database, journal, classifiers, archive)
+        _check_cross(r, mail, database, journal, classifiers, archive, ui)
 
         if r.errors:
             raise ConfigError(
@@ -295,6 +308,7 @@ class AppConfig:
             classifiers=classifiers,
             processing=processing,
             archive=archive,
+            ui=ui,
             logging=logging_cfg,
         )
 
@@ -459,27 +473,38 @@ def _read_processing(r: "_Reader") -> ProcessingConfig:
         ),
         retry_errors=r.boolean("processing", "retry_errors", True),
         state_path=r.path("processing", "state_path", "data/state.sqlite"),
-        archive_dir=r.path("processing", "archive_dir", "data"),
-        save_eml=r.boolean("processing", "save_eml", True),
+        on_attachment_problem=r.choice(
+            "processing", "on_attachment_problem", "register", ATTACHMENT_PROBLEM_MODES
+        ),
     )
 
 
-def _read_archive(r: "_Reader", processing: ProcessingConfig) -> ArchiveConfig:
-    """Секция [archive]; старые [processing] archive_dir/save_eml — запасной вариант."""
-    dir_raw = r.raw("archive", "dir")
-    archive_dir = r.path("archive", "dir", "") if dir_raw else processing.archive_dir
+def _read_archive(r: "_Reader") -> ArchiveConfig:
     return ArchiveConfig(
-        mode=r.choice("archive", "mode", "local", ARCHIVE_MODES),
-        dir=archive_dir,
         server=r.text("archive", "server"),
         share=r.text("archive", "share"),
-        path=(r.text("archive", "path") or "").strip().strip("/\\"),
         username=r.text("archive", "username"),
         password=r.text("archive", "password"),
         domain=r.text("archive", "domain"),
         smbclient=r.text("archive", "smbclient", "smbclient") or "smbclient",
         timeout=r.integer("archive", "timeout", 120, minimum=5, maximum=3600),
-        enabled=r.boolean("archive", "enabled", processing.save_eml),
+        enabled=r.boolean("archive", "enabled", True),
+        files_root=(r.text("archive", "files_root", "FILES") or "FILES").strip("/\\"),
+        scanned_table=r.text("archive", "scanned_table", "SCANNED") or "SCANNED",
+        scanned_generator=r.text("archive", "scanned_generator", "ID_SCANNED")
+        or "ID_SCANNED",
+        scanned_card_type=r.integer("archive", "scanned_card_type", 0, minimum=0),
+    )
+
+
+def _read_ui(r: "_Reader", archive: ArchiveConfig) -> UiConfig:
+    return UiConfig(
+        enabled=r.boolean("ui", "enabled", False),
+        host=r.text("ui", "host", "0.0.0.0") or "0.0.0.0",
+        port=r.integer("ui", "port", 8080, minimum=1, maximum=65535),
+        username=r.text("ui", "username", "admin") or "admin",
+        password=r.text("ui", "password"),
+        session_hours=r.integer("ui", "session_hours", 12, minimum=1, maximum=720),
     )
 
 
@@ -501,6 +526,7 @@ def _check_cross(
     journal: JournalConfig,
     classifiers: ClassifiersConfig,
     archive: ArchiveConfig,
+    ui: UiConfig,
 ) -> None:
     """Проверки, которым нужны значения из разных секций."""
     if not database.host:
@@ -536,13 +562,13 @@ def _check_cross(
             r.errors.append(
                 "[classifiers] correspondents_sql и themes_sql не могут быть пустыми"
             )
-    if archive.mode == "smb" and archive.enabled:
+    if archive.enabled:
         if not archive.server:
-            r.errors.append("[archive] server: не задано — сервер SMB (mode = smb)")
+            r.errors.append("[archive] server: не задано — сервер SMB")
         if not archive.share:
-            r.errors.append("[archive] share: не задано — имя шары SMB (mode = smb)")
+            r.errors.append("[archive] share: не задано — имя шары SMB")
         if not archive.username:
-            r.errors.append("[archive] username: не задано — пользователь SMB (mode = smb)")
+            r.errors.append("[archive] username: не задано — пользователь SMB")
         if not archive.smbclient.strip():
             r.errors.append("[archive] smbclient: не задано — команда smbclient")
         for name, value in (("server", archive.server), ("share", archive.share)):
@@ -550,6 +576,11 @@ def _check_cross(
                 r.errors.append(
                     "[archive] " + name + ": не должно содержать «/» или «\\»"
                 )
+    if ui.enabled:
+        if not ui.password:
+            r.errors.append("[ui] password: не задано — панель доступна по сети")
+        if ui.port < 1 or ui.port > 65535:
+            r.errors.append("[ui] port: недопустимый порт")
 
 
 # ---------------------------------------------------------------------- чтение

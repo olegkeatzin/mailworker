@@ -20,7 +20,7 @@ from pathlib import Path
 
 from . import __version__
 from .ai.client import AiClient
-from .archive import build_archive
+from .archive import SmbArchive
 from .classifiers import ClassifierService
 from .config import AppConfig
 from .errors import ConfigError, ProcessorError
@@ -68,6 +68,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="с --eml: действительно записать в журнал (без флага — только показать)",
     )
+    parser.add_argument(
+        "--status", action="store_true", help="показать очередь, ошибки и качество"
+    )
+    parser.add_argument(
+        "--retry-archive",
+        action="store_true",
+        help="повторить сохранение файлов из spool (CARD не меняется)",
+    )
+    parser.add_argument(
+        "--rescan-card",
+        metavar="CARD_ID",
+        help="заново разобрать письмо из spool и перезаписать CARD с этим ID",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=100, help="сколько файлов/писем обрабатывать за раз"
+    )
     parser.add_argument("--json", action="store_true", help="вывести результат в JSON")
     parser.add_argument("--log-level", help="уровень логирования: DEBUG, INFO, WARNING, ERROR")
     parser.add_argument("--version", action="version", version=__version__)
@@ -87,7 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # Разбор файла .eml и проверка настроек не требуют заполненного ящика:
         # --check должен показать все узлы сразу, а не остановиться на первом.
-        cfg = AppConfig.load(args.config, require_mail=not (args.eml or args.check))
+        cfg = AppConfig.load(
+            args.config,
+            require_mail=not (args.eml or args.check or args.status),
+        )
     except ConfigError as exc:
         print("Ошибка настроек:\n" + str(exc), file=sys.stderr)
         return 2
@@ -97,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.check:
             return run_check(cfg)
+        if args.status:
+            return run_status(cfg, as_json=args.json)
+        if args.retry_archive:
+            return run_retry_archive(cfg, limit=args.limit)
+        if args.rescan_card:
+            return run_rescan(cfg, args.rescan_card)
         if args.eml:
             return run_eml(cfg, Path(args.eml), write=args.write, as_json=args.json)
         return run_service(cfg, once=args.once)
@@ -114,7 +139,9 @@ def main(argv: list[str] | None = None) -> int:
 
 def run_service(cfg: AppConfig, *, once: bool) -> int:
     """Рабочий режим: опрос ящика (один проход или бесконечно)."""
-    service = MailWorkerService(cfg, build_processor(cfg))
+    service = MailWorkerService(
+        cfg, build_processor(cfg), processor_factory=lambda: build_processor(cfg)
+    )
     if once:
         stats = service.run_once()
         print("Проход: " + stats.as_text())
@@ -131,6 +158,72 @@ def run_service(cfg: AppConfig, *, once: bool) -> int:
             pass
 
     service.run_forever()
+    return 0
+
+
+def run_status(cfg: AppConfig, *, as_json: bool = False) -> int:
+    state = ProcessedState(cfg.processing.state_path)
+    quality = state.quality_counts()
+    queue = state.queue_counts()
+    failed = state.failed_files(limit=200)
+    errors = state.last_errors(limit=20)
+    data = {
+        "quality": quality,
+        "queue": queue,
+        "failed_files": failed,
+        "last_errors": errors,
+    }
+    has_problems = bool(failed) or bool(queue.get("failed"))
+    if as_json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 1 if has_problems else 0
+    print("Качество писем: " + ", ".join(f"{k}: {v}" for k, v in sorted(quality.items())))
+    print("Очередь архива: " + ", ".join(f"{k}: {v}" for k, v in sorted(queue.items())))
+    if failed:
+        print("Не сохранено файлов: " + str(len(failed)))
+        for item in failed[:20]:
+            print(
+                "  CARD.ID="
+                + str(item.get("card_id") or "—")
+                + "  "
+                + (item.get("filename") or item.get("kind") or "")
+                + "  "
+                + (item.get("last_error") or "")
+            )
+    else:
+        print("Несохранённых файлов нет.")
+    if errors:
+        print("Последние ошибки обработки:")
+        for item in errors[:10]:
+            print("  " + (item.get("message_id") or "") + ": " + (item.get("reason") or ""))
+    return 1 if has_problems else 0
+
+
+def run_retry_archive(cfg: AppConfig, *, limit: int = 100) -> int:
+    processor = build_processor(cfg)
+    outcome = processor.retry_archive(limit)
+    print(
+        "Повтор архива: сохранено "
+        + str(outcome.uploaded)
+        + ", ошибок "
+        + str(outcome.failed)
+    )
+    for error in outcome.errors[:20]:
+        print("  " + error)
+    return 0 if outcome.ok else 1
+
+
+def run_rescan(cfg: AppConfig, card_id: str) -> int:
+    try:
+        numeric_id = int(card_id)
+    except ValueError:
+        print("CARD.ID должен быть числом: " + card_id, file=sys.stderr)
+        return 2
+    processor = build_processor(cfg)
+    result = processor.rescan_card(numeric_id)
+    print("CARD.ID=" + str(card_id) + " пересканирован и перезаписан")
+    if result.card is not None:
+        print("SH_CONTENTS: " + result.card.sh_contents[:500])
     return 0
 
 
@@ -430,7 +523,7 @@ def _check_archive(cfg: AppConfig) -> bool:
         print("Архив: выключен ([archive] enabled = false)")
         return True
     try:
-        target = build_archive(cfg.archive).check()
+        target = SmbArchive(cfg.archive).check()
     except ProcessorError as exc:
         print("Архив: ОШИБКА — " + str(exc))
         return False

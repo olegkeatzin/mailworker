@@ -51,6 +51,13 @@ INSERT_SQL = (
     + ")"
 )
 
+#: Обновление тех же полей при пересканировании; ID не меняется.
+UPDATE_SQL = (
+    "UPDATE CARD SET "
+    + ", ".join(column + " = ?" for column in CARD_COLUMNS[1:])
+    + " WHERE ID = ?"
+)
+
 #: Имена кодировок Firebird и соответствующие кодеки Python.
 _CODEC_ALIASES = {
     "UTF8": "utf-8",
@@ -167,6 +174,27 @@ class FirebirdJournal:
             card.thema,
         )
         return InsertedCard(card_id=new_id, reg_number=card.intindex)
+
+    def update_card(self, card: CardData, card_id: int | str) -> None:
+        """Перезаписывает поля записи, не меняя ID (пересканирование)."""
+        connection = self._connect()
+        try:
+            cursor = connection.cursor()
+            try:
+                cursor.execute(UPDATE_SQL, self._params(card) + [int(card_id)])
+                if cursor.rowcount == 0:
+                    raise StorageError(
+                        "Запись CARD ID=" + str(card_id) + " не найдена — обновлять нечего"
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                cursor.close()
+        finally:
+            connection.close()
+        logger.info("Запись CARD ID=%s обновлена после пересканирования", card_id)
 
     # -------------------------------------------------------------- диагностика
 
