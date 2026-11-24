@@ -8,7 +8,8 @@ services:
       # Часовой пояс влияет на дату регистрации и окно since_days
       TZ: ${TZ:-Europe/Moscow}
     ports:
-      # Веб-панель; откройте в config.ini [ui] enabled = true
+      # UI_PORT — внешний порт на хосте; внутри контейнера всегда 8080
+      # (его задаёт [ui] port в config.ini). Включите [ui] enabled = true.
       - "${UI_PORT:-8080}:8080"
     volumes:
       # Настройки — только чтение; данные служба пишет в /app/data
