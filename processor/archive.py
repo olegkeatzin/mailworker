@@ -55,6 +55,32 @@ class SmbArchive:
         self._run(["ls"])
         return self.describe()
 
+    def download(self, remote_path: str, local_path: Path) -> None:
+        """Скачивает файл с шары (нужно для восстановления spool)."""
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        remote = remote_path.replace("\\", "/").strip("/")
+        self._run(
+            ["get " + _quote(remote) + " " + _quote(str(local_path))]
+        )
+        if not local_path.is_file():
+            raise ArchiveError(
+                "smbclient не создал файл " + str(local_path) + " (" + remote + ")"
+            )
+
+    def list_remote(self, remote_dir: str) -> list[str]:
+        """Список имён файлов в каталоге шары."""
+        remote = remote_dir.replace("\\", "/").strip("/")
+        output = self._run(["ls " + _quote(remote)])
+        names: list[str] = []
+        for line in output.splitlines():
+            parts = line.split()
+            if len(parts) < 2 or parts[0] in (".", ".."):
+                continue
+            # Строка smbclient: имя, атрибуты, размер, дата.
+            if len(parts) >= 3 and parts[1].isalpha():
+                names.append(parts[0])
+        return names
+
     def upload(
         self, content: bytes, remote_dir: str, remote_name: str
     ) -> str:
@@ -85,7 +111,7 @@ class SmbArchive:
 
     # ---------------------------------------------------------------- внутреннее
 
-    def _run(self, commands: list[str]) -> None:
+    def _run(self, commands: list[str]) -> str:
         auth_dir = _new_stage_dir()
         auth_path = self._write_auth_file(auth_dir)
         try:
@@ -128,6 +154,7 @@ class SmbArchive:
                     + (output[-500:] if output else "вывод пуст")
                 )
             logger.debug("smbclient: %s", output[-1000:] if output else "без вывода")
+            return output
         finally:
             shutil.rmtree(auth_dir, ignore_errors=True)
 

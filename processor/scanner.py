@@ -135,12 +135,55 @@ class ArchiveWorker:
 
     # ------------------------------------------------------------- повтор/поиск
 
+    def ensure_spool(self, key: str, card_id: int | None) -> bytes | None:
+        """Если spool потерян, скачивает .eml с шары по очереди/каталогу CARD."""
+        raw = self.spool.load(key)
+        if raw is not None:
+            return raw
+        if not self.cfg.archive.enabled or card_id in (None, ""):
+            return None
+        remote = self._remote_email(key, int(card_id))
+        if remote is None:
+            return None
+        local = self.spool.path(key).with_suffix(".download")
+        try:
+            self.archive.download(remote, local)
+            raw = local.read_bytes()
+            parse_eml(raw)
+            self.spool.save(key, raw)
+            logger.info("Spool восстановлен с SMB: %s", remote)
+            return raw
+        except Exception:  # noqa: BLE001
+            logger.exception("Не удалось скачать .eml с SMB: %s", remote)
+            return None
+        finally:
+            try:
+                local.unlink()
+            except OSError:
+                pass
+
+    def _remote_email(self, key: str, card_id: int) -> str | None:
+        rows = self.state.files_for(key)
+        for row in rows:
+            if row.get("index") == 0 and row.get("remote_path"):
+                return str(row["remote_path"])
+        remote_dir = self.cfg.archive.files_root + "/" + str(card_id)
+        try:
+            names = self.archive.list_remote(remote_dir)
+        except Exception:  # noqa: BLE001
+            logger.exception("Не удалось получить список %s", remote_dir)
+            return None
+        for name in names:
+            if name.lower().endswith(".eml"):
+                return remote_dir + "/" + name
+        return None
+
     def retry_files(self, limit: int = 100) -> ArchiveOutcome:
         """Повторяет pending/failed файлы из spool (CARD не меняется)."""
         outcome = ArchiveOutcome()
         for row in self.state.failed_files(limit):
             key = row["dedup_key"]
-            mail = self._load_mail(key)
+            mail = self._load_mail(key, row.get("card_id"))
             if mail is None:
                 outcome.failed += 1
                 outcome.errors.append(
@@ -167,8 +210,10 @@ class ArchiveWorker:
                 self.state.mark_file(row["id"], "failed", error=str(exc))
         return outcome
 
-    def _load_mail(self, key: str) -> MailMessage | None:
+    def _load_mail(self, key: str, card_id=None) -> MailMessage | None:
         raw = self.spool.load(key)
+        if raw is None:
+            raw = self.ensure_spool(key, card_id)
         if raw is None:
             return None
         try:

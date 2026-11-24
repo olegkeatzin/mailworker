@@ -84,6 +84,13 @@ class FakeArchive:
         self.uploads.append((remote_dir, remote_name, content))
         return remote_dir + "/" + remote_name
 
+    def download(self, remote_path, local_path):
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(self.payload)
+
+    def list_remote(self, remote_dir):
+        return []
+
     def doc_path(self, remote_dir, remote_name):
         return remote_dir.replace("/", "\\") + "\\" + remote_name
 
@@ -195,3 +202,23 @@ def test_spool_roundtrip(workdir: Path):
     assert spool.exists("key")
     spool.delete("key")
     assert not spool.exists("key")
+
+def test_ensure_spool_downloads_eml_from_smb(workdir: Path, fake_parts):
+    cfg = make_cfg(workdir)
+    state = ProcessedState(cfg.processing.state_path)
+    worker = ArchiveWorker(cfg, state)
+    mail = make_mail()
+    key = "imap|inbox|INBOX|id@test"
+    state.mark_registered(key, message_id="id@test", uid="1", card_id=178)
+    files = scanner_module.mail_files(mail)
+    state.enqueue_files(key, 178, files)
+    first = state.files_for(key)[0]
+    state.mark_file(
+        first["id"], "uploaded", remote_path="FILES/178/S111.eml", doc_path="FILES\\178\\S111.eml"
+    )
+    worker.archive.payload = mail.raw
+
+    raw = worker.ensure_spool(key, 178)
+
+    assert raw == mail.raw
+    assert worker.spool.exists(key)

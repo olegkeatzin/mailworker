@@ -594,8 +594,10 @@ class EmailProcessor:
         key = record["key"]
         raw = self.spool.load(key)
         if raw is None:
+            raw = self.archive_worker.ensure_spool(key, int(card_id))
+        if raw is None:
             raise StorageError(
-                "Нет исходного .eml в spool для CARD.ID=" + str(card_id)
+                "Нет исходного .eml в spool и на SMB для CARD.ID=" + str(card_id)
                 + " — пересканирование невозможно"
             )
         mail = parse_eml(raw)
