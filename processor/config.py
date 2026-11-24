@@ -24,7 +24,6 @@ from .errors import ConfigError
 PROTOCOLS = ("imap", "pop3")
 TLS_MODES = ("none", "ssl", "starttls")
 MAIL_MODES = ("unseen", "all", "since_days")
-STORAGE_MODES = ("db", "api")
 REG_DATE_MODES = ("today", "email_date")
 DOC_DATE_FALLBACKS = ("email_date", "reg_date", "today", "none")
 DOC_NUMBER_FALLBACKS = ("none", "subject", "regex")
@@ -127,9 +126,6 @@ class OcrConfig:
 class JournalConfig:
     """Что и куда писать в журнале."""
 
-    storage: str = "db"
-    api_url: str = "http://127.0.0.1:8000"
-    api_timeout: int = 30
     card_type: int = 1
     #: Значение INTINDEX для всех записей. По умолчанию «новая» (номер
     #: присваивает система учёта); можно задать своё, например «вх».
@@ -410,9 +406,6 @@ def _read_journal(r: "_Reader") -> JournalConfig:
         intindex = "новая"
 
     return JournalConfig(
-        storage=r.choice("journal", "storage", "db", STORAGE_MODES),
-        api_url=r.text("journal", "api_url", "http://127.0.0.1:8000").rstrip("/"),
-        api_timeout=r.integer("journal", "api_timeout", 30, minimum=1, maximum=600),
         card_type=r.integer("journal", "card_type", 1, minimum=0),
         intindex=intindex,
         reg_date=r.choice("journal", "reg_date", "today", REG_DATE_MODES),
@@ -510,20 +503,12 @@ def _check_cross(
     archive: ArchiveConfig,
 ) -> None:
     """Проверки, которым нужны значения из разных секций."""
-    if journal.storage == "db":
-        if not database.host:
-            r.errors.append("[database] host: не задано — нужен для записи в журнал (storage = db)")
-        if not database.database:
-            r.errors.append(
-                "[database] database: не задано — путь к файлу базы Firebird (storage = db)"
-            )
-        if not database.user:
-            r.errors.append("[database] user: не задано — пользователь Firebird")
-    else:
-        if not journal.api_url.startswith(("http://", "https://")):
-            r.errors.append(
-                "[journal] api_url: ожидается адрес вида http://host:8000 (storage = api)"
-            )
+    if not database.host:
+        r.errors.append("[database] host: не задано — нужен для записи в журнал")
+    if not database.database:
+        r.errors.append("[database] database: не задано — путь к файлу базы Firebird")
+    if not database.user:
+        r.errors.append("[database] user: не задано — пользователь Firebird")
     if mail.protocol == "imap" and mail.delete_after:
         r.errors.append(
             "[mail] delete_after: удаление писем поддерживается только для POP3 "

@@ -22,7 +22,6 @@ def test_reads_all_sections(workdir):
     assert cfg.database.charset == "WIN1251"
     assert cfg.ai.model == "test-model"
     assert cfg.journal.intindex == "новая"
-    assert cfg.journal.storage == "db"
     assert cfg.processing.filter_mode == "ai"
 
 
@@ -44,7 +43,6 @@ def test_all_errors_reported_at_once(workdir):
         {
             "mail": {"host": "", "username": ""},
             "ai": {"model": ""},
-            "journal": {"storage": "интерфейс"},
         },
     )
     with pytest.raises(ConfigError) as error:
@@ -53,7 +51,6 @@ def test_all_errors_reported_at_once(workdir):
     assert "[mail] host" in text
     assert "[mail] username" in text
     assert "[ai] model" in text
-    assert "[journal] storage" in text
 
 
 def test_percent_and_backslash_are_literal(workdir):
@@ -93,19 +90,6 @@ def test_require_mail_false_allows_empty_mailbox(workdir):
     assert cfg.mail.host == ""
 
 
-def test_storage_api_needs_no_database(workdir):
-    path = make_config(
-        workdir,
-        {
-            "journal": {"storage": "api", "api_url": "http://127.0.0.1:8000/"},
-            "database": {"host": "", "database": ""},
-        },
-    )
-    cfg = AppConfig.load(path)
-    assert cfg.journal.storage == "api"
-    assert cfg.journal.api_url == "http://127.0.0.1:8000"
-
-
 def test_request_extra_json(workdir):
     path = make_config(workdir, {"ai": {"request_extra_json": '{"top_k": 20}'}})
     cfg = AppConfig.load(path)
@@ -131,7 +115,6 @@ def test_shipped_example_is_valid():
 
     assert cfg.mail.protocol == "imap"
     assert cfg.database.database.endswith(".fdb")
-    assert cfg.journal.storage == "db"
     assert cfg.journal.doc_number_fallback == "none"
     assert cfg.journal.max_sh_contents_length == 512
     assert cfg.classifiers.enabled is True
@@ -203,19 +186,6 @@ def test_classifiers_need_database(workdir):
     with pytest.raises(ConfigError) as error:
         AppConfig.load(path)
     assert "[classifiers]" in str(error.value)
-
-
-def test_classifiers_can_be_disabled_without_database(workdir):
-    path = make_config(
-        workdir,
-        {
-            "classifiers": {"enabled": "false"},
-            "journal": {"storage": "api"},
-            "database": {"host": "", "database": ""},
-        },
-    )
-    cfg = AppConfig.load(path)
-    assert cfg.classifiers.enabled is False
 
 
 def test_email_map_path_is_relative_to_ini(workdir):

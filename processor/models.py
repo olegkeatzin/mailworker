@@ -126,7 +126,6 @@ class InsertedCard:
 
     card_id: int | str | None = None
     reg_number: str | None = None
-    storage: str = "db"
 
 
 @dataclass

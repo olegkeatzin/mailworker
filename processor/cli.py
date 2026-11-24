@@ -24,7 +24,7 @@ from .archive import build_archive
 from .classifiers import ClassifierService
 from .config import AppConfig
 from .errors import ConfigError, ProcessorError
-from .journal import ApiJournal, FirebirdDictionaries, FirebirdJournal
+from .journal import FirebirdDictionaries, FirebirdJournal
 from .logging_setup import setup_logging
 from .mail.parser import parse_eml
 from .mail.sources import build_source
@@ -146,9 +146,7 @@ def build_processor(cfg: AppConfig) -> EmailProcessor:
 
 
 def make_journal(cfg: AppConfig):
-    """Реализация записи журнала по настройке [journal] storage."""
-    if cfg.journal.storage == "api":
-        return ApiJournal(cfg.journal)
+    """Запись журнала: только Firebird."""
     return FirebirdJournal(cfg.database, cfg.journal)
 
 
@@ -294,8 +292,7 @@ def _result_to_json(result: ProcessResult) -> dict:
         payload["inserted"] = {
             "card_id": result.inserted.card_id,
             "reg_number": result.inserted.reg_number,
-            "storage": result.inserted.storage,
-        }
+            }
     return payload
 
 
@@ -321,8 +318,7 @@ def run_check(cfg: AppConfig) -> int:
     print(PROJECT_NAME)
     print("Файл настроек: " + str(cfg.path))
     print(
-        "Запись журнала: "
-        + ("Firebird (таблица CARD)" if cfg.journal.storage == "db" else "HTTP API /cards")
+        "Запись журнала: Firebird (таблица CARD)"
     )
     print()
 

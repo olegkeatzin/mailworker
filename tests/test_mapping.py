@@ -8,7 +8,7 @@ import datetime as dt
 import pytest
 
 from processor.classifiers import ResolvedCorrespondent, ResolvedTheme
-from processor.journal.mapping import build_card, describe_card, to_api_payload
+from processor.journal.mapping import build_card, describe_card
 from processor.models import Analysis, MailMessage, PreparedAttachment
 
 
@@ -206,34 +206,6 @@ def test_sheets_modes(journal_cfg):
     assert build_card(dataclasses.replace(journal_cfg, sheets_mode="analysis"), analysis, make_mail(), prepared).pages_doc == 9
     assert build_card(dataclasses.replace(journal_cfg, sheets_mode="attachments"), analysis, make_mail(), prepared).pages_doc == 1
     assert build_card(dataclasses.replace(journal_cfg, sheets_mode="one"), analysis, make_mail(), prepared).pages_doc == 1
-
-
-def test_api_payload(journal_cfg):
-    card = build_card(journal_cfg, make_analysis(), make_mail())
-    payload = to_api_payload(card, make_analysis())
-    assert payload["docNumber"] == "45/12"
-    assert payload["docDate"] == "2026-10-18"
-    assert payload["regDate"] == dt.date.today().isoformat()
-    assert payload["sender"] == "ООО «Ромашка», Иванов И.И."
-    assert payload["documentName"] == "Счёт"
-    assert payload["sheetsCount"] == card.pages_doc
-    assert payload["correspondentId"] is None
-
-
-def test_api_payload_passes_correspondent_id(journal_cfg):
-    correspondent = ResolvedCorrespondent(name="ООО «Ромашка»", id=42, matched=True)
-    card = build_card(journal_cfg, make_analysis(), make_mail(), correspondent=correspondent)
-    payload = to_api_payload(card, make_analysis())
-    assert payload["correspondentId"] == 42
-
-
-def test_api_payload_requires_doc_date(journal_cfg):
-    """В модели FastAPI docDate обязательный: подставляем дату регистрации."""
-    analysis = make_analysis(doc_date=None)
-    cfg = dataclasses.replace(journal_cfg, doc_date_fallback="none")
-    card = build_card(cfg, analysis, make_mail())
-    payload = to_api_payload(card, analysis)
-    assert payload["docDate"] == card.intdate.isoformat()
 
 
 def test_describe_card(journal_cfg):

@@ -33,7 +33,7 @@ class FakeJournal:
 
     def insert_card(self, card, analysis=None):
         self.cards.append(card)
-        return InsertedCard(card_id=136, reg_number="новая", storage="db")
+        return InsertedCard(card_id=136, reg_number="новая")
 
     def ping(self) -> str:
         return "тестовая база"

@@ -55,7 +55,6 @@ DEFAULT_SECTIONS: dict[str, dict[str, str]] = {
     },
     "ocr": {},
     "journal": {
-        "storage": "db",
         "intindex": "новая",
         "sheets_mode": "pdf_pages",
     },

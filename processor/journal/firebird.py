@@ -166,7 +166,7 @@ class FirebirdJournal:
             card.korrespid,
             card.thema,
         )
-        return InsertedCard(card_id=new_id, reg_number=card.intindex, storage="db")
+        return InsertedCard(card_id=new_id, reg_number=card.intindex)
 
     # -------------------------------------------------------------- диагностика
 

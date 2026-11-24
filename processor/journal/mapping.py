@@ -173,26 +173,6 @@ def _pdf_pages(prepared: list[PreparedAttachment]) -> int:
     return max(1, len(prepared))
 
 
-def to_api_payload(card: CardData, analysis: Analysis | None = None) -> dict:
-    """Тело запроса к FastAPI-сервису — по api.md.
-
-    Даты — строго ГГГГ-ММ-ДД: сервис разбирает их strptime-ом и упадёт на другом
-    формате. docDate в модели обязательный, поэтому при отсутствии берём дату
-    регистрации (иначе запрос не пройдёт проверку).
-    """
-    doc_date = card.extdate or card.intdate
-    return {
-        "docNumber": card.extindex,
-        "docDate": doc_date.isoformat(),
-        "sender": card.korresp,
-        "summary": card.sh_contents,
-        "documentName": (analysis.document_name if analysis is not None else "") or "",
-        "sheetsCount": card.pages_doc,
-        "regDate": card.intdate.isoformat(),
-        "correspondentId": card.korrespid or None,
-    }
-
-
 def describe_card(card: CardData) -> str:
     """Короткая строка записи для журнала работы службы."""
     date_text = card.extdate.strftime("%d.%m.%Y") if card.extdate else "без даты"

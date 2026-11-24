@@ -1,21 +1,17 @@
-"""Запись в журнал: Firebird (fdb) и HTTP API — без живой базы и сервера."""
+"""Запись в журнал Firebird (fdb) — без живой базы."""
 
 from __future__ import annotations
 
 import datetime as dt
-import json
 import sys
-import threading
 import types
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from processor.config import DatabaseConfig, JournalConfig
 from processor.errors import StorageError
-from processor.journal.api_client import ApiJournal
 from processor.journal.firebird import INSERT_SQL, FirebirdJournal
-from processor.models import Analysis, CardData
+from processor.models import CardData
 
 
 def make_card(**overrides) -> CardData:
@@ -112,7 +108,6 @@ def test_insert_card_parameters_and_commit(monkeypatch, db_cfg, journal_cfg):
 
     assert inserted.card_id == 136
     assert inserted.reg_number == "новая"
-    assert inserted.storage == "db"
     assert connection.committed is True
     assert "GEN_ID(ID_CARD, 1)" in connection.calls[0][0]
 
@@ -235,94 +230,3 @@ def test_insert_error_rolls_back(monkeypatch, db_cfg, journal_cfg):
 
 
 # ------------------------------------------------------------------- HTTP API
-
-
-class ApiServer:
-    """Мини-сервер /cards: повторяет контракт из api.md."""
-
-    def __init__(self, status: int = 201, answer: dict | None = None) -> None:
-        self.requests: list[dict] = []
-        self.raw_requests: list[dict] = []
-        self.status = status
-        self.answer = answer or {"id": 136, "regNumber": "вх136"}
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-        self._thread.start()
-
-    @property
-    def url(self) -> str:
-        host, port = self._server.server_address[:2]
-        return "http://" + host + ":" + str(port)
-
-    def _handler(self):
-        server = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):  # noqa: N802
-                length = int(self.headers.get("Content-Length") or 0)
-                raw = self.rfile.read(length)
-                server.requests.append(json.loads(raw))
-                server.raw_requests.append(dict(self.headers))
-                data = json.dumps(server.answer, ensure_ascii=False).encode("utf-8")
-                self.send_response(server.status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-
-            def do_GET(self):  # noqa: N802
-                self.send_response(200)
-                self.send_header("Content-Length", "2")
-                self.end_headers()
-                self.wfile.write(b"{}")
-
-            def log_message(self, *_args):
-                pass
-
-        return Handler
-
-    def close(self) -> None:
-        self._server.shutdown()
-        self._server.server_close()
-
-
-@pytest.fixture()
-def api_server():
-    server = ApiServer()
-    yield server
-    server.close()
-
-
-def test_api_insert_sends_fields(api_server, journal_cfg):
-    cfg = JournalConfig(storage="api", api_url=api_server.url)
-    journal = ApiJournal(cfg)
-    inserted = journal.insert_card(make_card(), Analysis(document_name="Счёт"))
-
-    assert inserted.card_id == 136
-    assert inserted.reg_number == "вх136"
-    assert inserted.storage == "api"
-    payload = api_server.requests[0]
-    assert payload["docNumber"] == "45/12"
-    assert payload["docDate"] == "2026-10-18"
-    assert payload["regDate"] == "2026-11-05"
-    assert payload["documentName"] == "Счёт"
-    assert payload["sender"] == "ООО «Ромашка»"
-    assert api_server.raw_requests[0]["Content-Type"].startswith("application/json")
-
-
-def test_api_error_is_reported(journal_cfg):
-    server = ApiServer(status=500)
-    try:
-        journal = ApiJournal(JournalConfig(storage="api", api_url=server.url))
-        with pytest.raises(StorageError) as error:
-            journal.insert_card(make_card())
-        assert "HTTP 500" in str(error.value)
-    finally:
-        server.close()
-
-
-def test_api_unreachable(journal_cfg):
-    journal = ApiJournal(JournalConfig(storage="api", api_url="http://127.0.0.1:1"))
-    with pytest.raises(StorageError) as error:
-        journal.insert_card(make_card())
-    assert "api_url" in str(error.value)

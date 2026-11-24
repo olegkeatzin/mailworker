@@ -1,15 +1,12 @@
-"""Журнал учёта: поля записи, справочники и две реализации записи."""
+"""Журнал учёта: поля записи, справочники и запись в Firebird."""
 
-from .api_client import ApiJournal
 from .dictionaries import FirebirdDictionaries
 from .firebird import FirebirdJournal
-from .mapping import build_card, describe_card, to_api_payload
+from .mapping import build_card, describe_card
 
 __all__ = [
-    "ApiJournal",
     "FirebirdDictionaries",
     "FirebirdJournal",
     "build_card",
     "describe_card",
-    "to_api_payload",
 ]

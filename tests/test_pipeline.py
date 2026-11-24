@@ -70,7 +70,7 @@ class FakeJournal:
             raise self.error
         self.cards.append(card)
         self.analyses.append(analysis)
-        return InsertedCard(card_id=136 + len(self.cards), reg_number="новая", storage="db")
+        return InsertedCard(card_id=136 + len(self.cards), reg_number="новая")
 
     def close(self):
         pass
