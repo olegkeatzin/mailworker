@@ -315,6 +315,15 @@ class EmailProcessor:
         logger.debug(
             "Записано в журнал (id=%s): %s", inserted.card_id, describe_card(card)
         )
+        # Одна INFO-строка на новое письмо — чтобы в логе были видны обработки,
+        # но без подробностей по каждому этапу (они на DEBUG).
+        logger.info(
+            "Новое письмо: CARD.ID=%s, «%s», вложений: %s, качество: %s",
+            inserted.card_id,
+            mail.subject or "(без темы)",
+            len(mail.attachments),
+            quality if outcome.ok else "degraded",
+        )
         return ProcessResult(
             status=STATUS_REGISTERED,
             message_id=mail.message_id,
@@ -658,7 +667,7 @@ class EmailProcessor:
         elif quality == "ok":
             self.spool.delete(key)
         self.state.log_rescan(card_id, key, record.get("card_json") or "", snapshot)
-        logger.debug("Пересканирование CARD.ID=%s завершено: %s", card_id, describe_card(card))
+        logger.info("Пересканировано CARD.ID=%s: %s", card_id, describe_card(card))
         return ProcessResult(
             status=STATUS_REGISTERED,
             message_id=mail.message_id,
