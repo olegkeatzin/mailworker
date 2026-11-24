@@ -309,7 +309,8 @@ class EmailProcessor:
                 "degraded" if quality == "ok" else quality,
                 json.dumps(warnings + problems, ensure_ascii=False),
             )
-        else:
+        elif quality == "ok":
+            # Spool нужен для пересканирования degraded-писем; успешные удаляем.
             self.spool.delete(key)
         logger.info(
             "Записано в журнал (id=%s): %s", inserted.card_id, describe_card(card)
@@ -652,7 +653,7 @@ class EmailProcessor:
             self.state.set_quality(
                 key, "degraded", json.dumps(warnings + problems, ensure_ascii=False)
             )
-        else:
+        elif quality == "ok":
             self.spool.delete(key)
         self.state.log_rescan(card_id, key, record.get("card_json") or "", snapshot)
         logger.info("Пересканирование CARD.ID=%s завершено: %s", card_id, describe_card(card))

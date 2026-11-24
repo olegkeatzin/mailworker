@@ -10,6 +10,7 @@ from conftest import build_email, make_config
 
 from processor.classifiers import ClassifierService, Correspondent, Theme
 from processor.config import AppConfig
+from processor.mail.parser import parse_eml
 from processor.mail.sources import FetchedMessage
 from processor.models import InsertedCard
 from processor.pipeline import (
@@ -646,3 +647,17 @@ def test_ai_mode_asks_model_for_decision(workdir):
     assert '"register"' in prompt
     assert '"confidence"' in prompt
     assert '"category"' in prompt
+
+def test_degraded_letter_keeps_spool(env):
+    """Degraded письмо остаётся в spool для пересканирования."""
+    cfg, state, _client, journal, processor = env
+    raw = build_email(
+        attachments=[("архив.zip", "application/zip", b"PK\x03\x04")],
+    )
+
+    result = processor.process_raw(raw, uid="1")
+
+    assert result.status == STATUS_REGISTERED
+    record = state.get(processor.dedup_key(parse_eml(raw)))
+    assert record is not None and record["quality"] == "degraded"
+    assert processor.spool.exists(processor.dedup_key(parse_eml(raw)))
