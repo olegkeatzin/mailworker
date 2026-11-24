@@ -165,7 +165,7 @@ class FirebirdJournal:
             finally:
                 connection.close()
 
-        logger.info(
+        logger.debug(
             "Запись в журнал добавлена: ID=%s, INTINDEX=%s, EXTINDEX=%s, KORRESPID=%s, THEMA=%s",
             new_id,
             card.intindex,
@@ -194,7 +194,7 @@ class FirebirdJournal:
                 cursor.close()
         finally:
             connection.close()
-        logger.info("Запись CARD ID=%s обновлена после пересканирования", card_id)
+        logger.debug("Запись CARD ID=%s обновлена после пересканирования", card_id)
 
     # -------------------------------------------------------------- диагностика
 

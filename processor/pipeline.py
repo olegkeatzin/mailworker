@@ -104,7 +104,7 @@ class EmailProcessor:
     def process_mail(self, mail: MailMessage, *, dry_run: bool = False) -> ProcessResult:
         started = time.monotonic()
         key = self.dedup_key(mail)
-        logger.info(
+        logger.debug(
             "Письмо %s «%s» от %s",
             mail.message_id,
             mail.subject,
@@ -115,7 +115,7 @@ class EmailProcessor:
             key, retry_errors=self.cfg.processing.retry_errors
         ):
             record = self.state.get(key) or {}
-            logger.info(
+            logger.debug(
                 "Письмо уже обработано (%s), пропущено. Карточка: %s",
                 record.get("status"),
                 record.get("card_id") or "—",
@@ -196,14 +196,14 @@ class EmailProcessor:
         )
         if analysis.register is None and analysis.confidence is None:
             # В режимах all/with_attachments решение модели не спрашивается вовсе.
-            logger.info(
+            logger.debug(
                 "Разбор ИИ (решение модели не спрашивается, filter_mode = %s): "
                 + fields[0],
                 self.cfg.processing.filter_mode,
                 *fields[1:],
             )
         else:
-            logger.info(
+            logger.debug(
                 "Разбор ИИ: регистрировать=%s (уверенность %s), " + fields[0],
                 _yes_no(analysis.register),
                 "—" if analysis.confidence is None else analysis.confidence,
@@ -312,7 +312,7 @@ class EmailProcessor:
         elif quality == "ok":
             # Spool нужен для пересканирования degraded-писем; успешные удаляем.
             self.spool.delete(key)
-        logger.info(
+        logger.debug(
             "Записано в журнал (id=%s): %s", inserted.card_id, describe_card(card)
         )
         return ProcessResult(
@@ -335,7 +335,7 @@ class EmailProcessor:
         started: float,
     ) -> ProcessResult:
         """Письмо осознанно не регистрируется — с причиной в журнале работы."""
-        logger.info("Письмо %s пропущено: %s", mail.message_id, reason)
+        logger.debug("Письмо %s пропущено: %s", mail.message_id, reason)
         if not dry_run:
             self.state.mark_skipped(
                 key, message_id=mail.message_id, uid=mail.uid, reason=reason
@@ -353,7 +353,7 @@ class EmailProcessor:
     ) -> None:
         """Пишет в лог, что нашлось в справочниках: это главный след проверки."""
         if correspondent.matched:
-            logger.info(
+            logger.debug(
                 "Корреспондент: «%s» → KORRESP ID=%s (%s%s)",
                 correspondent.name,
                 correspondent.id,
@@ -361,12 +361,12 @@ class EmailProcessor:
                 ", похожесть " + str(correspondent.score) if correspondent.score else "",
             )
         else:
-            logger.info(
+            logger.debug(
                 "Корреспондент: в справочнике не найден, в журнал пойдёт «%s»",
                 correspondent.name or "пусто",
             )
         if theme.matched:
-            logger.info(
+            logger.debug(
                 "Тема: «%s» → THEMA ID=%s (%s%s)",
                 theme.name,
                 theme.id,
@@ -374,7 +374,7 @@ class EmailProcessor:
                 ", похожесть " + str(theme.score) if theme.score else "",
             )
         elif theme.name:
-            logger.info("Тема: «%s» → THEMA ID=%s", theme.name, theme.id or "не определена")
+            logger.debug("Тема: «%s» → THEMA ID=%s", theme.name, theme.id or "не определена")
 
     def _build_input(
         self,
@@ -431,7 +431,7 @@ class EmailProcessor:
         if not jobs:
             return ["" for _ in prepared]
 
-        logger.info(
+        logger.debug(
             "Распознавание изображений: %s страниц(ы) в %s вложениях",
             len(jobs),
             sum(1 for item in prepared if item.images),
@@ -553,7 +553,7 @@ class EmailProcessor:
             )
         outcome = self.archive_worker.archive_letter(mail, int(inserted.card_id), key)
         if outcome.ok:
-            logger.info(
+            logger.debug(
                 "Письмо и вложения сохранены: //%s/%s/%s/ (файлов: %s)",
                 self.cfg.archive.server,
                 self.cfg.archive.share,
@@ -658,7 +658,7 @@ class EmailProcessor:
         elif quality == "ok":
             self.spool.delete(key)
         self.state.log_rescan(card_id, key, record.get("card_json") or "", snapshot)
-        logger.info("Пересканирование CARD.ID=%s завершено: %s", card_id, describe_card(card))
+        logger.debug("Пересканирование CARD.ID=%s завершено: %s", card_id, describe_card(card))
         return ProcessResult(
             status=STATUS_REGISTERED,
             message_id=mail.message_id,

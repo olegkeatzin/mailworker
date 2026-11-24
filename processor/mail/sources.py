@@ -122,7 +122,7 @@ class ImapMailSource:
                 + str(exc)
             ) from exc
         self._conn = conn
-        logger.info(
+        logger.debug(
             "Подключено к IMAP %s:%s, папка «%s»", cfg.host, cfg.port, cfg.mailbox
         )
 
@@ -142,7 +142,7 @@ class ImapMailSource:
         # Берём последние: uid растёт вместе с порядком поступления.
         selected = uids[-limit:]
         window = self.window_date()
-        logger.info(
+        logger.debug(
             "В папке «%s» найдено писем: %s, к обработке: %s%s",
             self.cfg.mailbox,
             len(uids),
@@ -332,12 +332,12 @@ class Pop3MailSource:
         if cutoff is not None:
             # POP3 не умеет искать по дате, поэтому окно применяем сами:
             # смотрим заголовок Date и тело старых писем не скачиваем.
-            logger.info(
+            logger.debug(
                 "POP3: окно — последние %s (с %s), фильтр по заголовку Date.",
                 _days_text(cfg.since_days),
                 cutoff.strftime("%d.%m.%Y"),
             )
-        logger.info(
+        logger.debug(
             "Подключено к POP3 %s:%s, писем в ящике: %s",
             cfg.host,
             cfg.port,
@@ -358,7 +358,7 @@ class Pop3MailSource:
             self._load_uidl(conn)
         numbers = sorted(self._uid_by_number)[-limit:]
         cutoff = self._since_cutoff()
-        logger.info(
+        logger.debug(
             "Проверяем писем: %s из %s%s",
             len(numbers),
             len(self._uid_by_number),
@@ -388,13 +388,13 @@ class Pop3MailSource:
             messages.append(FetchedMessage(uid=uid, raw=raw))
 
         if skipped:
-            logger.info(
+            logger.debug(
                 "Пропущено писем старше %s (окно since_days = %s): %s",
                 cutoff.strftime("%d.%m.%Y") if cutoff else "",
                 _days_text(self.cfg.since_days),
                 skipped,
             )
-        logger.info("К обработке: %s", len(messages))
+        logger.debug("К обработке: %s", len(messages))
         return messages
 
     def _since_cutoff(self) -> dt.date | None:
@@ -444,7 +444,7 @@ class Pop3MailSource:
         try:
             conn.dele(number)
             self._pending_delete.add(number)
-            logger.info("Письмо №%s помечено к удалению с сервера", number)
+            logger.debug("Письмо №%s помечено к удалению с сервера", number)
         except poplib.error_proto as exc:
             logger.warning("Не удалось удалить письмо №%s: %s", number, exc)
 

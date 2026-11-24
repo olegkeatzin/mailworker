@@ -126,7 +126,7 @@ class ArchiveWorker:
             remote_path=remote_path,
             doc_path=doc_path,
         )
-        logger.info(
+        logger.debug(
             "Файл сохранён: %s -> %s (SCANNED.ID=%s)",
             item.get("filename") or item["kind"],
             doc_path,
@@ -151,7 +151,7 @@ class ArchiveWorker:
             raw = local.read_bytes()
             parse_eml(raw)
             self.spool.save(key, raw)
-            logger.info("Spool восстановлен с SMB: %s", remote)
+            logger.debug("Spool восстановлен с SMB: %s", remote)
             return raw
         except Exception:  # noqa: BLE001
             logger.exception("Не удалось скачать .eml с SMB: %s", remote)
