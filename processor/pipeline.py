@@ -344,7 +344,12 @@ class EmailProcessor:
         started: float,
     ) -> ProcessResult:
         """Письмо осознанно не регистрируется — с причиной в журнале работы."""
-        logger.debug("Письмо %s пропущено: %s", mail.message_id, reason)
+        logger.info(
+            "Письмо пропущено: «%s» от %s, причина: %s",
+            mail.subject or "(без темы)",
+            mail.from_display or "неизвестного отправителя",
+            reason,
+        )
         if not dry_run:
             self.state.mark_skipped(
                 key, message_id=mail.message_id, uid=mail.uid, reason=reason
