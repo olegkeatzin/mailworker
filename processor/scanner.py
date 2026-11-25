@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from .archive import SmbArchive, extension_for
+from .archive import build_archive, extension_for
 from .config import AppConfig
 from .errors import ArchiveError, StorageError
 from .journal.scanned import ScannedStore
@@ -66,10 +66,10 @@ def mail_files(mail: MailMessage) -> list[dict]:
 class ArchiveWorker:
     """Очередь файлов + SMB + SCANNED для одного письма."""
 
-    def __init__(self, cfg: AppConfig, state: ProcessedState) -> None:
+    def __init__(self, cfg: AppConfig, state: ProcessedState, archive=None) -> None:
         self.cfg = cfg
         self.state = state
-        self.archive = SmbArchive(cfg.archive)
+        self.archive = archive or build_archive(cfg.archive)
         self.spool = Spool(cfg.processing.state_path.parent / "spool")
 
     def archive_letter(self, mail: MailMessage, card_id: int, key: str) -> ArchiveOutcome:

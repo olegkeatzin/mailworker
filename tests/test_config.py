@@ -361,3 +361,13 @@ def test_archive_server_and_share_cannot_contain_slash(workdir):
         AppConfig.load(path)
 
     assert "[archive] server" in str(error.value)
+
+def test_archive_transport_defaults_to_auto(workdir):
+    cfg = AppConfig.load(make_config(workdir))
+    assert cfg.archive.transport == "auto"
+
+
+def test_archive_transport_unc(workdir):
+    path = make_config(workdir, {"archive": {"transport": "unc"}})
+    cfg = AppConfig.load(path)
+    assert cfg.archive.transport == "unc"

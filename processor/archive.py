@@ -104,10 +104,7 @@ class SmbArchive:
         return remote_dir.strip("/") + "/" + remote_name
 
     def doc_path(self, remote_dir: str, remote_name: str) -> str:
-        """DOC_PATH для SCANNED: путь с обратными слешами, без ведущего слеша."""
-        relative = remote_dir.replace("/", "\\").strip("\\")
-        relative = (relative + "\\" + remote_name) if relative else remote_name
-        return relative
+        return _doc_path(remote_dir, remote_name)
 
     # ---------------------------------------------------------------- внутреннее
 
@@ -182,6 +179,80 @@ class SmbArchive:
         except OSError:
             pass
         return path
+
+
+class UncArchive:
+    r"""Архив через обычный UNC-путь Windows: \\server\share\FILES\...
+
+    Не требует smbclient: служба работает под учётной записью, у которой есть
+    доступ к шаре. На Linux этот режим не используется.
+    """
+
+    def __init__(self, cfg: ArchiveConfig, root: Path | None = None) -> None:
+        self.cfg = cfg
+        self.root = root if root is not None else Path("//" + cfg.server + "/" + cfg.share)
+
+    def describe(self) -> str:
+        return chr(92) * 2 + self.cfg.server + chr(92) + self.cfg.share
+
+    def check(self) -> str:
+        try:
+            folder = self.root / (self.cfg.files_root or "FILES")
+            folder.mkdir(parents=True, exist_ok=True)
+            probe = folder / ".mailworker-write-test"
+            probe.write_bytes(b"ok")
+            probe.unlink()
+        except OSError as exc:
+            raise ArchiveError(
+                "Нет доступа к " + self.describe() + ": " + str(exc)
+            ) from exc
+        return self.describe()
+
+    def upload(self, content: bytes, remote_dir: str, remote_name: str) -> str:
+        target = self.root / remote_dir.replace("\\", "/") / remote_name
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        except OSError as exc:
+            raise ArchiveError(
+                "Не удалось записать " + str(target) + ": " + str(exc)
+            ) from exc
+        return remote_dir.strip("/") + "/" + remote_name
+
+    def download(self, remote_path: str, local_path: Path) -> None:
+        source = self.root / remote_path.replace("\\", "/")
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copyfile(source, local_path)
+        except OSError as exc:
+            raise ArchiveError(
+                "Не удалось прочитать " + str(source) + ": " + str(exc)
+            ) from exc
+
+    def list_remote(self, remote_dir: str) -> list[str]:
+        folder = self.root / remote_dir.replace("\\", "/")
+        try:
+            return [item.name for item in folder.iterdir() if item.is_file()]
+        except OSError as exc:
+            raise ArchiveError(
+                "Не удалось прочитать каталог " + str(folder) + ": " + str(exc)
+            ) from exc
+
+    def doc_path(self, remote_dir: str, remote_name: str) -> str:
+        return _doc_path(remote_dir, remote_name)
+
+
+def build_archive(cfg: ArchiveConfig):
+    """Выбирает транспорт: UNC на Windows, smbclient на Linux."""
+    if cfg.transport == "unc" or (cfg.transport == "auto" and os.name == "nt"):
+        return UncArchive(cfg)
+    return SmbArchive(cfg)
+
+
+def _doc_path(remote_dir: str, remote_name: str) -> str:
+    relative = remote_dir.replace("/", "\\").strip("\\")
+    relative = (relative + "\\" + remote_name) if relative else remote_name
+    return relative
 
 
 def extension_for(mime_type: str, filename: str | None) -> str:

@@ -19,8 +19,9 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from . import winservice
 from .ai.client import AiClient
-from .archive import SmbArchive
+from .archive import build_archive
 from .classifiers import ClassifierService
 from .config import AppConfig
 from .errors import ConfigError, ProcessorError
@@ -69,6 +70,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="с --eml: действительно записать в журнал (без флага — только показать)",
     )
     parser.add_argument(
+        "--install-service", action="store_true", help="установить службу Windows"
+    )
+    parser.add_argument(
+        "--remove-service", action="store_true", help="удалить службу Windows"
+    )
+    parser.add_argument(
+        "--service", action="store_true", help=argparse.SUPPRESS
+    )
+    parser.add_argument(
         "--status", action="store_true", help="показать очередь, ошибки и качество"
     )
     parser.add_argument(
@@ -99,6 +109,17 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     args = build_parser().parse_args(argv)
+
+    try:
+        if args.remove_service:
+            return winservice.remove_service()
+        if args.install_service:
+            return winservice.install_service(args.config)
+        if args.service:
+            return winservice.run_service(args.config)
+    except ProcessorError as exc:
+        print("Ошибка службы: " + str(exc), file=sys.stderr)
+        return 1
 
     try:
         # Разбор файла .eml и проверка настроек не требуют заполненного ящика:
@@ -523,7 +544,7 @@ def _check_archive(cfg: AppConfig) -> bool:
         print("Архив: выключен ([archive] enabled = false)")
         return True
     try:
-        target = SmbArchive(cfg.archive).check()
+        target = build_archive(cfg.archive).check()
     except ProcessorError as exc:
         print("Архив: ОШИБКА — " + str(exc))
         return False

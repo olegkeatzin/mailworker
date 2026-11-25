@@ -167,6 +167,8 @@ max_name_length = 150
 [archive]
 ; Файлы сохраняются на SMB-шару: FILES/<CARD.ID>/S<SCANNED.ID><ext>,
 ; на каждый файл создаётся строка SCANNED. Локального режима больше нет.
+; transport: auto — UNC на Windows и smbclient на Linux; smb/unc — принудительно.
+transport = auto
 server = srv-sadko-db
 share = SadkoAI
 username = sfs@asup.local

@@ -34,6 +34,7 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 UNKNOWN_CORRESPONDENT_MODES = ("model", "none", "skip", "create")
 UNKNOWN_THEMA_MODES = ("none", "skip", "create")
 ATTACHMENT_PROBLEM_MODES = ("register", "skip", "error")
+ARCHIVE_TRANSPORTS = ("auto", "smb", "unc")
 
 #: Запросы к справочникам по умолчанию. Четыре колонки строго по порядку:
 #: идентификатор, название, часть номера, признак «показывать».
@@ -195,6 +196,8 @@ class ArchiveConfig:
     FILES/<CARD.ID>/S<SCANNED.ID><ext> и описывается строкой в SCANNED.
     """
 
+    #: auto — UNC на Windows и smbclient на Linux; smb/unc — принудительно.
+    transport: str = "auto"
     server: str = ""
     share: str = ""
     username: str = ""
@@ -481,6 +484,7 @@ def _read_processing(r: "_Reader") -> ProcessingConfig:
 
 def _read_archive(r: "_Reader") -> ArchiveConfig:
     return ArchiveConfig(
+        transport=r.choice("archive", "transport", "auto", ARCHIVE_TRANSPORTS),
         server=r.text("archive", "server"),
         share=r.text("archive", "share"),
         username=r.text("archive", "username"),
@@ -569,7 +573,7 @@ def _check_cross(
             r.errors.append("[archive] share: не задано — имя шары SMB")
         if not archive.username:
             r.errors.append("[archive] username: не задано — пользователь SMB")
-        if not archive.smbclient.strip():
+        if archive.transport == "smb" and not archive.smbclient.strip():
             r.errors.append("[archive] smbclient: не задано — команда smbclient")
         for name, value in (("server", archive.server), ("share", archive.share)):
             if "/" in value or "\\" in value:

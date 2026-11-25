@@ -11,7 +11,7 @@ from conftest import build_email, make_config
 
 from processor import archive as archive_module
 from processor import scanner as scanner_module
-from processor.archive import SmbArchive
+from processor.archive import SmbArchive, UncArchive, build_archive
 from processor.config import AppConfig
 from processor.mail.parser import parse_eml
 from processor.scanner import ArchiveWorker
@@ -133,7 +133,7 @@ def fake_parts(monkeypatch):
     FakeStore.inserted = []
     FakeStore.deleted = []
     FakeStore.committed = 0
-    monkeypatch.setattr(scanner_module, "SmbArchive", FakeArchive)
+    monkeypatch.setattr(scanner_module, "build_archive", lambda cfg: FakeArchive(cfg))
     monkeypatch.setattr(scanner_module, "ScannedStore", FakeStore)
 
 
@@ -222,3 +222,24 @@ def test_ensure_spool_downloads_eml_from_smb(workdir: Path, fake_parts):
 
     assert raw == mail.raw
     assert worker.spool.exists(key)
+
+def test_unc_archive_writes_and_reads(workdir: Path):
+    cfg = make_cfg(workdir).archive
+    archive = UncArchive(cfg, root=workdir / "share")
+
+    where = archive.upload(b"data", "FILES/178", "S111.pdf")
+
+    assert where == "FILES/178/S111.pdf"
+    assert (workdir / "share" / "FILES" / "178" / "S111.pdf").read_bytes() == b"data"
+    assert archive.doc_path("FILES/178", "S111.pdf") == "FILES\\178\\S111.pdf"
+    assert archive.list_remote("FILES/178") == ["S111.pdf"]
+    local = workdir / "download.pdf"
+    archive.download("FILES/178/S111.pdf", local)
+    assert local.read_bytes() == b"data"
+
+
+def test_build_archive_transport():
+    from processor.config import ArchiveConfig
+
+    assert isinstance(build_archive(ArchiveConfig(transport="unc")), UncArchive)
+    assert isinstance(build_archive(ArchiveConfig(transport="smb")), SmbArchive)

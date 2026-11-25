@@ -90,6 +90,15 @@ docker compose down                           # остановить
 docker compose up -d --build
 ```
 
+### Windows Server 2012/2012 R2
+
+Нативная служба Windows без Docker и NSSM: `MailWorkerService.exe` собирается
+PyInstaller, регистрируется через `--install-service`, ставится Inno Setup.
+Архив на Windows пишется по UNC-пути, smbclient не нужен.
+
+Подробно: [deploy/windows/README-windows.md](deploy/windows/README-windows.md).
+Для 2012 R2 — Python 3.9 x64, для 2012 без R2 — Python 3.8 x64.
+
 ### Локально
 
 ```bash
@@ -207,10 +216,12 @@ python main.py                      # рабочий запуск
 | Ключ | Значение |
 |---|---|
 | `enabled` | сохранять файлы и заполнять `SCANNED` (по умолчанию `true`) |
+| `transport` | `auto` (UNC на Windows, smbclient на Linux), `smb`, `unc` |
 | `server`, `share` | SMB-сервер и шара |
 | `username`, `password`, `domain` | учётные данные SMB |
-| `smbclient`, `timeout` | команда smbclient и таймаут, секунды |
+| `smbclient`, `timeout` | команда smbclient (только для `transport = smb`) и таймаут, секунды |
 | `files_root` | корень на шаре, по умолчанию `FILES` |
+| | **UNC**: запись по `\\server\share\FILES\...` под учётной записью службы, без smbclient |
 | `scanned_table`, `scanned_generator` | `SCANNED` и `ID_SCANNED` |
 | `scanned_card_type` | `CARD_TYPE` в `SCANNED`, по умолчанию `0` |
 
@@ -270,7 +281,8 @@ truncation». Запись выполняется одной транзакци�
 
 ## Архив и SCANNED
 
-Каждый файл письма (сам `.eml` и каждое вложение) сохраняется на SMB-шару:
+Каждый файл письма (сам `.eml` и каждое вложение) сохраняется на шару
+(SMB через smbclient или UNC-путь Windows):
 
 ```
 //srv-sadko-db/SadkoAI/FILES/178/
@@ -285,7 +297,7 @@ truncation». Запись выполняется одной транзакци�
 2. вставляется строка `SCANNED` (`MASTERID = CARD.ID`, `OLD_MASTERID = CARD.ID`,
    `CARD_TYPE = 0`, `WHO = [mail] username`,
    `DOC_PATH = FILES\<CARD.ID>\S<ID><ext>`);
-3. файл загружается через `smbclient`;
+3. файл загружается через `smbclient` или пишется по UNC-пути;
 4. успех — `commit`, ошибка — `rollback` и компенсирующий `DELETE` строки.
 
 - Локального режима нет: архив только на шаре.
@@ -418,7 +430,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-284 теста: настройки, разбор писем и вложений (PDF/DOCX/XLSX/картинки/вложенные
+291 тест: настройки, разбор писем и вложений (PDF/DOCX/XLSX/картинки/вложенные
 `.eml`), промпт и разбор ответа модели, поля журнала и обрезка по длинам колонок,
 `INSERT` с `KORRESPID`/`THEMA` и HTTP-эндпоинт, справочники и политики, дедупликация,
 конвейер, проход по ящику, IMAP/POP3 (включая окно `since_days`), командная строка.

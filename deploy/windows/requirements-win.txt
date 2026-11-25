@@ -1,0 +1,10 @@
+# Сборка под Windows Server 2012/2012 R2.
+# Python 3.8 x64 — для 2012 без R2; Python 3.9 x64 — для 2012 R2.
+fdb>=2.0.2
+pypdf>=4.0,<5
+pymupdf>=1.24,<2.0
+python-docx>=1.1
+openpyxl>=3.1
+Pillow>=10,<11
+pywin32>=306
+pyinstaller>=6.0

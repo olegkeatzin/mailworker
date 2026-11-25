@@ -1,0 +1,88 @@
+; MailWorker для Windows Server 2012/2012 R2.
+; Данные и логи — в C:\ProgramData\MailWorker, программа — в C:\Program Files\MailWorker.
+
+[mail]
+protocol = imap
+host = mail.example.ru
+port = 993
+tls = ssl
+username = inbox@example.ru
+password =
+verify_tls = true
+mailbox = INBOX
+mode = all
+since_days = 1
+mark_seen = true
+poll_interval = 60
+
+[database]
+host = 10.0.0.10
+database = C:\firebird\data\journal.fdb
+user = SYSDBA
+password =
+charset = WIN1251
+; fbclient.dll той же разрядности, что Python/exe
+fb_client_library = C:\Program Files\MailWorker\fbclient.dll
+
+[ai]
+base_url = http://127.0.0.1:11434/v1
+api_key = not-needed
+model = qwen
+timeout = 120
+temperature = 0.2
+max_tokens = 8192
+retries = 2
+
+[ocr]
+base_url =
+model =
+
+[journal]
+card_type = 1
+intindex = новая
+reg_date = today
+doc_date_fallback = email_date
+doc_number_fallback = none
+sheets_mode = pdf_pages
+
+[archive]
+; auto: на Windows пишет по UNC-пути \\server\share, без smbclient
+transport = auto
+server = srv-sadko-db
+share = SadkoAI
+username = sfs@asup.local
+password =
+domain =
+smbclient = smbclient
+timeout = 120
+enabled = true
+files_root = FILES
+scanned_table = SCANNED
+scanned_generator = ID_SCANNED
+scanned_card_type = 0
+
+[ui]
+enabled = true
+host = 0.0.0.0
+port = 4000
+username = admin
+password =
+session_hours = 12
+
+[processing]
+filter_mode = all
+skip_spam = false
+require_register_flag = true
+min_confidence = 0.0
+skip_inline_images = true
+min_inline_image_bytes = 30000
+retry_errors = true
+state_path = C:\ProgramData\MailWorker\data\state.sqlite
+on_attachment_problem = register
+
+[logging]
+level = INFO
+file = C:\ProgramData\MailWorker\logs\mailworker.log
+console = false
+max_bytes = 5000000
+backup_count = 5

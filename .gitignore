@@ -20,6 +20,11 @@ venv/
 .venv*/
 pip-wheel-metadata/
 
+# Сборка Windows
+dist/
+build/
+*.spec
+
 # Тесты и кэши
 .pytest_cache/
 tests/.work/
